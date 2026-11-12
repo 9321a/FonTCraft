@@ -14,6 +14,8 @@
 #
 # Paquetes de Ubuntu que necesita para compilar en el propio equipo (una sola vez):
 #   build-essential pkg-config libgtk-3-dev libxdo-dev libayatana-appindicator3-dev
+# FONTCRAFT_NO_CROSS=1: for another architecture, build with cargo using the compiler and libraries
+# already installed for it (no Docker), as the GitHub Actions ARMv7 job does.
 set -e
 cd "$(dirname "$0")"
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -40,8 +42,15 @@ if [ -z "$TARGET" ]; then
   DEB_TARGET=""
 else
   ARCH=$(echo "$TARGET" | cut -d- -f1)
-  command -v cross >/dev/null 2>&1 || cargo install cross
-  cross build --release --target "$TARGET"
+  if [ -n "$FONTCRAFT_NO_CROSS" ]; then
+    # The target's compiler and libraries are installed on this machine (as GitHub Actions does
+    # for ARMv7): plain cargo.
+    rustup target add "$TARGET" 2>/dev/null || true
+    cargo build --release --target "$TARGET"
+  else
+    command -v cross >/dev/null 2>&1 || cargo install cross
+    cross build --release --target "$TARGET"
+  fi
   OUT="target/$TARGET/release"
   DEB_TARGET="--target $TARGET"
 fi

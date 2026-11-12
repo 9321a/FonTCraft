@@ -45,9 +45,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: android
-      - uses: android-actions/setup-android@v3
       - name: Android NDK
-        run: sdkmanager "ndk;26.3.11579264"
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;26.3.11579264"
       - name: Compile for Android
         working-directory: android
         env:

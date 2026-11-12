@@ -12,3 +12,5 @@
 *.jks
 *.p12
 *.pfx
+# Test pictures (--screenshot).
+/shots/

@@ -1295,6 +1295,7 @@ dependencies = [
  "tray-icon",
  "ttf-parser",
  "ureq",
+ "winit",
  "winresource",
  "zip",
 ]

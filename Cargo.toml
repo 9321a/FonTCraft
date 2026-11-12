@@ -86,6 +86,8 @@ codegen-units = 1
 strip = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The window library eframe uses (same version), for opening without taking focus (--screenshot).
+winit = { version = "0.30", default-features = false }
 core-foundation = "0.10"
 objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"

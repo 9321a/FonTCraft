@@ -166,6 +166,9 @@ struct App {
     frame: u64,
     screenshot: Option<PathBuf>,
     shot_requested: bool,
+    /// When --screenshot started and when the picture was last asked for (seconds).
+    shot_started: Option<f64>,
+    shot_asked_at: f64,
     /// The window picture the system hands back for --screenshot.
     shot_image: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
     settings: Settings,
@@ -502,6 +505,8 @@ impl App {
             frame: 0,
             screenshot,
             shot_requested: false,
+            shot_started: None,
+            shot_asked_at: 0.0,
             shot_image: Default::default(),
             settings_open: std::env::var("FONT_SHELF_OPEN_SETTINGS").is_ok(),
             settings_tab: match std::env::var("FONT_SHELF_SETTINGS_TAB").as_deref() {
@@ -1810,11 +1815,27 @@ impl eframe::App for App {
         self.frame += 1;
 
         if let Some(path) = self.screenshot.clone() {
+            // Keeps drawing while unfocused (and while macOS draws a hidden window slowly).
             ctx.request_repaint();
+            let now = ctx.input(|i| i.time);
+            let started = *self.shot_started.get_or_insert(now);
             // Waits a little longer while the Google Fonts list is still arriving.
-            let waiting = ((self.gf.open && self.gf.shared.lock().unwrap().loading) || self.print.as_ref().is_some_and(|p| p.loading())) && self.frame < 900;
-            if self.frame >= 120 && !waiting && !self.shot_requested {
+            let waiting = ((self.gf.open && self.gf.shared.lock().unwrap().loading) || self.print.as_ref().is_some_and(|p| p.loading())) && self.frame < 900 && now - started < 20.0;
+            // About 120 frames, or 4 seconds when the window draws slowly (covered, or not in
+            // front): a covered window on macOS gets few frames, and waiting for 120 of them took
+            // longer than the check allows. A picture asked for and not delivered within 3 s is
+            // asked for again; after 60 s FontCraft gives up and quits.
+            let ready = (self.frame >= 120 || (now - started >= 4.0 && self.frame >= 10)) && !waiting;
+            if self.shot_requested && now - self.shot_asked_at > 3.0 {
+                self.shot_requested = false;
+            }
+            if now - started > 60.0 {
+                eprintln!("screenshot: no picture after 60 s");
+                std::process::exit(1);
+            }
+            if ready && !self.shot_requested {
                 self.shot_requested = true;
+                self.shot_asked_at = now;
                 // eframe 0.37 delivers the picture to a callback; it is kept until the next frame.
                 let slot = self.shot_image.clone();
                 let repaint = ctx.clone();
@@ -2218,14 +2239,31 @@ fn main() -> eframe::Result<()> {
         .position(|a| a == "--screenshot")
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([900.0, 560.0])
-            .with_title("FontCraft")
-            .with_icon(std::sync::Arc::new(appicon::window_icon(appicon::system_is_dark()))),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1280.0, 800.0])
+        .with_min_inner_size([900.0, 560.0])
+        .with_title("FontCraft")
+        .with_icon(std::sync::Arc::new(appicon::window_icon(appicon::system_is_dark())));
+    // --screenshot (the automatic checks): the window opens without taking focus, so a check never
+    // gets in the way of what the person is doing; on Windows also behind the other windows (a
+    // covered window still draws there; on macOS and Linux it may stop drawing, so it isn't lowered).
+    if screenshot.is_some() {
+        viewport = viewport.with_active(false);
+        #[cfg(target_os = "windows")]
+        {
+            viewport = viewport.with_window_level(egui::WindowLevel::AlwaysOnBottom);
+        }
+    }
+    #[allow(unused_mut)]
+    let mut options = eframe::NativeOptions { viewport, ..Default::default() };
+    // macOS: the app doesn't come to the front either.
+    #[cfg(target_os = "macos")]
+    if screenshot.is_some() {
+        options.event_loop_builder = Some(Box::new(|b| {
+            use winit::platform::macos::EventLoopBuilderExtMacOS;
+            b.with_activate_ignoring_other_apps(false);
+        }));
+    }
     eframe::run_native("FontCraft", options, Box::new(move |cc| Ok(Box::new(App::new(cc, screenshot)))))
 }
 
