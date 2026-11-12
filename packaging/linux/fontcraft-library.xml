@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FontCraft libraries (.fcl): install with
+     xdg-mime install packaging/linux/fontcraft-library.xml
+     xdg-icon-resource install --size 256 assets/icons/png/fontcraft-library-256.png application-x-fontcraft-library -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-fontcraft-library">
+    <comment>FontCraft Library</comment>
+    <icon name="application-x-fontcraft-library"/>
+    <glob pattern="*.fcl"/>
+  </mime-type>
+</mime-info>

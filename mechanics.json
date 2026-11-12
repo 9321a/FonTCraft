@@ -1,0 +1,960 @@
+{
+  "version": 1,
+  "values": [
+    {
+      "name": "activation scope",
+      "group": "activation",
+      "value": 2,
+      "source": "function 0x10004b974 (-[RFFontActivator activateFontByName:andURL:andEnabled:]): CTFontManagerRegisterFontsForURL(url, 2, &err)"
+    },
+    {
+      "name": "activated fonts stay on after logout",
+      "group": "activation",
+      "value": true,
+      "source": "function 0x10004b974: scope 2 = kCTFontManagerScopePersistent"
+    },
+    {
+      "name": "unregister from the current scope before registering",
+      "group": "activation",
+      "value": true,
+      "source": "function 0x10004b974: CTFontManagerGetScopeForURL then CTFontManagerUnregisterFontsForURL"
+    },
+    {
+      "name": "default preview size in the font list",
+      "group": "preview",
+      "value": 16,
+      "unit": "pt",
+      "source": "function 0x1000aa540 (-[RFPreferencesHandler fontPreviewListViewFontSize]) returns 16 when unset"
+    },
+    {
+      "name": "default sample view size",
+      "group": "preview",
+      "value": 24,
+      "unit": "pt",
+      "source": "function 0x1000aa494 (-[RFPreferencesHandler fontPreviewSampleViewFontSize]) returns 24 when unset"
+    },
+    {
+      "name": "font size step",
+      "group": "preview",
+      "value": 4,
+      "unit": "pt",
+      "source": "function 0x10003b4c4 (-[RFMainWindowController increaseFontSizeNotified:]): integerValue + 4, capped at max"
+    },
+    {
+      "name": "smallest preview size",
+      "group": "preview",
+      "value": 10,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "largest preview size",
+      "group": "preview",
+      "value": 160,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "font lists ordered by",
+      "group": "libraries",
+      "value": "created",
+      "source": "query at 0x100296ae0: WITH RECURSIVE collections … ORDER BY created"
+    },
+    {
+      "name": "subfolders become nested lists named after their own folder",
+      "group": "libraries",
+      "value": true,
+      "source": "function 0x100080b44 (-[RFFontService loadCollectionsAndFontsFromURLs:andParentCollection:toLiveLibrary:])"
+    },
+    {
+      "name": "a list includes its sub-lists' fonts",
+      "group": "libraries",
+      "value": true,
+      "source": "query at 0x10028a4b4 (recursive over collection.parent)"
+    },
+    {
+      "name": "Google Fonts library name",
+      "group": "google fonts",
+      "value": "Google Fonts",
+      "source": "string 0x100283f26 used with GoogleFontsLibrary"
+    },
+    {
+      "name": "Google Fonts list kept before refreshing",
+      "group": "google fonts",
+      "value": 7,
+      "unit": "days",
+      "estimated": true
+    },
+    {
+      "name": "Google Fonts download timeout",
+      "group": "google fonts",
+      "value": 60,
+      "unit": "s",
+      "estimated": true
+    },
+    {
+      "name": "panel tab width",
+      "group": "layout",
+      "value": 14,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "panel tab height",
+      "group": "layout",
+      "value": 56,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "activation asterisk size",
+      "group": "activation",
+      "value": 18,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "activation asterisk color when off",
+      "group": "activation",
+      "value": "#9A9AA2",
+      "estimated": true
+    },
+    {
+      "name": "activation asterisk color when on",
+      "group": "activation",
+      "value": "#32CD32",
+      "estimated": true
+    },
+    {
+      "name": "feature examples shown per feature",
+      "group": "features",
+      "value": 60,
+      "estimated": true
+    },
+    {
+      "name": "glyph size on the Glyphs page",
+      "group": "preview",
+      "value": 72,
+      "unit": "pt",
+      "source": "person's request (RightFont's default is 24, function 0x1000aa7d4)"
+    },
+    {
+      "name": "default sidebar width",
+      "group": "layout",
+      "value": 210,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "default font panel width",
+      "group": "layout",
+      "value": 400,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "sidebar width range when resizing",
+      "group": "layout",
+      "value": "150-480",
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "font panel width range when resizing",
+      "group": "layout",
+      "value": "260-760",
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "accent colours (order)",
+      "group": "appearance",
+      "value": "coral, blue, violet, green, amber, pink",
+      "source": "VectorCraft crates/ui-egui/src/theme.rs Accent::ALL"
+    },
+    {
+      "name": "coral accent (light/dark panels)",
+      "group": "appearance",
+      "value": "#d9472f / #f06a52",
+      "source": "VectorCraft theme.rs"
+    },
+    {
+      "name": "blue accent (light/dark panels)",
+      "group": "appearance",
+      "value": "#2563eb / #5b96ff",
+      "source": "VectorCraft theme.rs"
+    },
+    {
+      "name": "violet accent (light/dark panels)",
+      "group": "appearance",
+      "value": "#7146dc / #a98bff",
+      "source": "VectorCraft theme.rs"
+    },
+    {
+      "name": "green accent (light/dark panels)",
+      "group": "appearance",
+      "value": "#16955a / #3fcf8e",
+      "source": "VectorCraft theme.rs"
+    },
+    {
+      "name": "amber accent (light/dark panels)",
+      "group": "appearance",
+      "value": "#b06d06 / #f5b544",
+      "source": "VectorCraft theme.rs"
+    },
+    {
+      "name": "pink accent (light/dark panels)",
+      "group": "appearance",
+      "value": "#cc3672 / #f36aa3",
+      "source": "VectorCraft theme.rs"
+    },
+    {
+      "name": "Auto Activation app check interval",
+      "group": "auto activation",
+      "value": 1.5,
+      "unit": "s",
+      "estimated": true
+    },
+    {
+      "name": "turn off auto-activated fonts when FontCraft quits (default)",
+      "group": "auto activation",
+      "value": false,
+      "source": "function 0x1000a9518 (-[RFPreferencesHandler autoDeactivateAutoActivatedFonts]) returns NO when unset"
+    },
+    {
+      "name": "turn off manually activated fonts when FontCraft quits (default)",
+      "group": "auto activation",
+      "value": false,
+      "source": "function 0x1000a95c0 (-[RFPreferencesHandler autoDeactivateManuallyActivatedFonts]) returns NO when unset"
+    },
+    {
+      "name": "activate the whole family (default)",
+      "group": "auto activation",
+      "value": false,
+      "source": "function 0x1000a9470 (-[RFPreferencesHandler autoActivateFontFamily]) returns NO when unset"
+    },
+    {
+      "name": "auto activation on (default)",
+      "group": "auto activation",
+      "value": true,
+      "source": "function 0x1000a91e8 (-[RFPreferencesHandler enableAutoActivationFonts]) returns YES when unset"
+    },
+    {
+      "name": "open with a keyboard shortcut (default)",
+      "group": "start-up",
+      "value": false,
+      "source": "function 0x1000a8a98 (-[RFPreferencesHandler canBeOpenedByShortcut]) returns NO when unset"
+    },
+    {
+      "name": "wait after copying the selection",
+      "group": "auto activation",
+      "value": 0.2,
+      "unit": "s",
+      "source": "AppleScript string 0x10028b730: keystroke \"c\" using command down / delay 0.2"
+    },
+    {
+      "name": "wait after activating the app before pasting",
+      "group": "auto activation",
+      "value": 0.1,
+      "unit": "s",
+      "source": "AppleScript string 0x10028b813: activate / delay 0.1 / keystroke \"v\""
+    },
+    {
+      "name": "fonts turned off on quit when neither option is on",
+      "group": "auto activation",
+      "value": "temporarily activated fonts only",
+      "source": "function 0x1000c0234 (-[RFUIScenesRouter deactivateFontsWhenQuits])"
+    },
+    {
+      "name": "show Google Fonts in the sidebar (default)",
+      "group": "sidebar",
+      "value": true,
+      "source": "function 0x1000a9abc (-[RFPreferencesHandler showGoogleFonts]) returns YES when unset"
+    },
+    {
+      "name": "show Adobe Fonts in the sidebar (default)",
+      "group": "sidebar",
+      "value": true,
+      "source": "function 0x1000a9b64 (-[RFPreferencesHandler showAdobeFonts]) returns YES when unset"
+    },
+    {
+      "name": "show Favorites in the sidebar (default)",
+      "group": "sidebar",
+      "value": true,
+      "source": "function 0x1000a9a14 (-[RFPreferencesHandler showStarredFonts]) returns YES when unset"
+    },
+    {
+      "name": "show Smart Lists in the sidebar (default)",
+      "group": "sidebar",
+      "value": true,
+      "source": "function 0x1000a9f54 (-[RFPreferencesHandler showSmartFilters]) returns YES when unset"
+    },
+    {
+      "name": "launch at login (default)",
+      "group": "start-up",
+      "value": false,
+      "source": "function 0x1000a89f0 (-[RFPreferencesHandler launchOnLogin]) returns NO when unset"
+    },
+    {
+      "name": "keep running in the menu bar (default)",
+      "group": "start-up",
+      "value": false,
+      "source": "function 0x1000a8b40 (-[RFPreferencesHandler showMenubar]) returns NO when unset"
+    },
+    {
+      "name": "turn fonts on after importing (default)",
+      "group": "libraries",
+      "value": false,
+      "source": "function 0x1000a9098 (-[RFPreferencesHandler activatingFontsAfterImported]) returns NO when unset"
+    },
+    {
+      "name": "smaller size rule",
+      "group": "preview",
+      "value": "max(size - 4, minimum)",
+      "source": "function 0x10003b5d0 (-[RFMainWindowController decreaseFontSizeNotified:])"
+    },
+    {
+      "name": "English sample text",
+      "group": "preview",
+      "value": "The quick brown fox jumps over the lazy dog",
+      "source": "string 0x1002952e0"
+    },
+    {
+      "name": "launch at login method",
+      "group": "start-up",
+      "value": "login item (FontCraft: LaunchAgent)",
+      "source": "function 0x1000078a8: SMLoginItemSetEnabled(com.rightfontapp.RightFontHelper, on)"
+    },
+    {
+      "name": "FontCraft library file",
+      "group": "libraries",
+      "value": "~/FontCraft/<name>.fcl (folder with library.json)",
+      "source": "person's request (FontCraft's own format)"
+    },
+    {
+      "name": "fonts in a FontCraft library are sorted into",
+      "group": "libraries",
+      "value": "one folder per first letter of the family name (A–Z, 0-9, #)",
+      "source": "person's request"
+    },
+    {
+      "name": "font list row height",
+      "group": "preview",
+      "value": "top + size × extent(sample) + gap",
+      "source": "person's request: samples never cut off"
+    },
+    {
+      "name": "row icon size",
+      "group": "layout",
+      "value": 18,
+      "unit": "pt",
+      "source": "activation asterisk size, shared by padlock, format and star (person's request)"
+    },
+    {
+      "name": "macOS control height",
+      "group": "system look",
+      "value": 22,
+      "unit": "pt",
+      "source": "macOS regular control size"
+    },
+    {
+      "name": "macOS check box size",
+      "group": "system look",
+      "value": 14,
+      "unit": "pt",
+      "source": "macOS regular check box"
+    },
+    {
+      "name": "font row: sample top inset",
+      "group": "layout",
+      "value": 23,
+      "unit": "pt",
+      "source": "function 0x100068570 (-[RFFontItemView updateTextRenderLayerFrame]): frame y = 23"
+    },
+    {
+      "name": "font row: sample bottom inset",
+      "group": "layout",
+      "value": 5,
+      "unit": "pt",
+      "source": "function 0x100068570: height − 28 (23 + 5)"
+    },
+    {
+      "name": "font row: sample side inset",
+      "group": "layout",
+      "value": 12,
+      "unit": "pt",
+      "source": "function 0x100068570: x = 12, width − 24"
+    },
+    {
+      "name": "font row: star centre from right edge",
+      "group": "layout",
+      "value": 16,
+      "unit": "pt",
+      "source": "function 0x100068b4c (-[RFFontItemView updateLayer]): star 16×16 at width − 24"
+    },
+    {
+      "name": "font row: icon line from top",
+      "group": "layout",
+      "value": 15,
+      "unit": "pt",
+      "source": "function 0x100068b4c: activation icon 14×14 at y 8"
+    },
+    {
+      "name": "variable font test",
+      "group": "fonts",
+      "value": "has variation axes",
+      "source": "function 0x1000fed50 (-[RFFontFileHandler fontHasVariations:])"
+    },
+    {
+      "name": "duplicate check on import",
+      "group": "libraries",
+      "value": "same font name (PostScript name)",
+      "source": "function 0x1000ff100 (-[RFFontFileHandler existingFontMatchingFont:])"
+    },
+    {
+      "name": "details Preview tab size",
+      "group": "preview",
+      "value": 60,
+      "unit": "pt",
+      "source": "person's request"
+    },
+    {
+      "name": "app icon size in Auto Activation",
+      "group": "auto activation",
+      "value": 24,
+      "unit": "pt",
+      "source": "person's request: 12–24 pt"
+    },
+    {
+      "name": "line spacing rule for wrapped samples",
+      "group": "preview",
+      "value": "max(line height, ink below + ink above + 6% of size)",
+      "source": "person's request: lines never overlap"
+    },
+    {
+      "name": "similar-shape match limit",
+      "group": "glyphs",
+      "value": 0.16,
+      "estimated": true
+    },
+    {
+      "name": "similar-shape results shown",
+      "group": "glyphs",
+      "value": 60,
+      "estimated": true
+    },
+    {
+      "name": "similar-shape preview size",
+      "group": "glyphs",
+      "value": 96,
+      "unit": "pt",
+      "source": "person's request"
+    },
+    {
+      "name": "print resolution",
+      "group": "print",
+      "value": 2,
+      "unit": "px per pt",
+      "estimated": true
+    },
+    {
+      "name": "print page margin",
+      "group": "print",
+      "value": 40,
+      "unit": "pt",
+      "estimated": true
+    },
+    {
+      "name": "marked-font dot diameter",
+      "group": "layout",
+      "value": 13,
+      "unit": "pt",
+      "source": "person's request: the asterisk's size"
+    },
+    {
+      "name": "glyph size step",
+      "group": "glyphs",
+      "value": 2,
+      "unit": "pt",
+      "source": "function 0x1000b7388 (-[RFFontGlyphViewController increaseFontSize:]) size + 2"
+    },
+    {
+      "name": "largest glyph size",
+      "group": "glyphs",
+      "value": 128,
+      "unit": "pt",
+      "source": "function 0x1000b7388: grows while size ≤ 126 (constant 0x100282518)"
+    },
+    {
+      "name": "smallest glyph size",
+      "group": "glyphs",
+      "value": 56,
+      "unit": "pt",
+      "source": "function 0x1000b7300 (decreaseFontSize:): shrinks while size ≥ 58"
+    },
+    {
+      "name": "glyph double-click",
+      "group": "glyphs",
+      "value": "copy",
+      "source": "function 0x1000b6504 sends copy: (0x1000b7208)"
+    },
+    {
+      "name": "dragged glyph saved to",
+      "group": "glyphs",
+      "value": "Caches folder",
+      "source": "function 0x1000b68c8: NSSearchPathForDirectoriesInDomains(13, 1, 1)"
+    },
+    {
+      "name": "open families are remembered",
+      "group": "libraries",
+      "value": true,
+      "source": "setting ExpandedFontFamilies (0x10029775b), restored by 0x1001082a0 (-[RFFontListViewController restoreExpandedState])"
+    },
+    {
+      "name": "open-family key",
+      "group": "libraries",
+      "value": "<library>-<family>",
+      "source": "function 0x1001081a8 (-[RFFontListViewController expandedKeyForItem:]) format \"%@-%@\""
+    },
+    {
+      "name": "sidebar items can open only with children",
+      "group": "libraries",
+      "value": true,
+      "source": "function 0x10012e888 (-[RFNavigationViewController outlineView:isItemExpandable:])"
+    },
+    {
+      "name": "app versions shown in Auto Activation",
+      "group": "auto activation",
+      "value": "CFBundleShortVersionString",
+      "source": "function 0x100005f14 (-[RFFontActivationPreferencesViewController versionStringForApp:])"
+    },
+    {
+      "name": "minimum macOS",
+      "group": "packaging",
+      "value": "11.0",
+      "source": "RightFont Info.plist LSMinimumSystemVersion"
+    },
+    {
+      "name": "app category",
+      "group": "packaging",
+      "value": "public.app-category.graphics-design",
+      "source": "RightFont Info.plist LSApplicationCategoryType"
+    },
+    {
+      "name": "folder watch latency",
+      "group": "libraries",
+      "value": 0.25,
+      "unit": "s",
+      "source": "function 0x10000c420 (-[RFFileWatcher start]): FSEventStreamCreate latency 0.25"
+    },
+    {
+      "name": "folder watch flags",
+      "group": "libraries",
+      "value": "0x1F (CF types, no defer, watch root, ignore self, file events)",
+      "source": "function 0x10000c420: FSEventStreamCreate flags 0x1f"
+    },
+    {
+      "name": "library default location",
+      "group": "libraries",
+      "value": "~/<App name>",
+      "source": "function 0x1000ab780 (-[RFPreferencesHandler libraryDefaultLocation]): \"%@/RightFont\""
+    },
+    {
+      "name": "import folders option (default)",
+      "group": "libraries",
+      "value": false,
+      "source": "function 0x1000a9140 (-[RFPreferencesHandler importFolders]) returns NO when unset"
+    },
+    {
+      "name": "re-read after a folder change",
+      "group": "libraries",
+      "value": 1.0,
+      "unit": "s",
+      "estimated": true
+    },
+    {
+      "name": "font classes (RightFont numbering)",
+      "group": "smart lists",
+      "value": "1 Sans Serif, 2 Serif, 3 Slab Serif, 4 Script, 5 Blackletter, 7 Display, 8 Symbols, 9 Monospaced",
+      "source": "function 0x10009ee74 (-[RFFont classificationString]), table 0x10030f048"
+    },
+    {
+      "name": "smart list order",
+      "group": "smart lists",
+      "value": "sans, serif, slab, script, blackletter, display, symbols, monospaced",
+      "source": "table 0x10030f048 order"
+    },
+    {
+      "name": "display class hints",
+      "group": "smart lists",
+      "value": "PANOSE family 4 or IBM class 9",
+      "estimated": true
+    },
+    {
+      "name": "slab class hint",
+      "group": "smart lists",
+      "value": "IBM class 5",
+      "estimated": true
+    },
+    {
+      "name": "font search fields",
+      "group": "search",
+      "value": "name, full name, display name, family group, style, manufacturer, designer, copyright, license",
+      "source": "query at 0x100285208"
+    },
+    {
+      "name": "font search match",
+      "group": "search",
+      "value": "contains (LIKE '%text%'), any case",
+      "source": "query at 0x100285208"
+    },
+    {
+      "name": "glyph filter",
+      "group": "glyphs",
+      "value": "character == typed and/or category == chosen",
+      "source": "function 0x1000b7050 (-[RFFontGlyphViewController filterGlyphs]), strings 0x10029142d / 0x100291461 / 0x10029147c"
+    },
+    {
+      "name": "glyph cell corner radius",
+      "group": "glyphs",
+      "value": 8.0,
+      "source": "function 0x1000670f4 (-[RFFontGlyphView updateLayer]), fmov d0, #8.0"
+    },
+    {
+      "name": "chosen glyph tint",
+      "group": "glyphs",
+      "value": 0.08,
+      "source": "function 0x1000670f4 (-[RFFontGlyphView updateLayer]), constant 0x100282548"
+    },
+    {
+      "name": "hovered glyph tint",
+      "group": "glyphs",
+      "value": 0.025,
+      "source": "function 0x1000670f4 (-[RFFontGlyphView updateLayer]), constant 0x1002825d0"
+    },
+    {
+      "name": "glyph preview placement",
+      "group": "glyphs",
+      "value": "x = (W - advance) * 0.5; baseline = descent + (H - (ascent + descent)) * 0.5",
+      "source": "function 0x10008d54c (-[RFGlyphDrawingView drawRect:])"
+    },
+    {
+      "name": "single glyph placement",
+      "group": "glyphs",
+      "value": "centred by its ink box: x = (W - inkW) * 0.5 - inkX, y = (H - inkH) * 0.5 - inkY",
+      "source": "function 0x10000bc4c (-[RFGlyphView drawRect:])"
+    },
+    {
+      "name": "delete asks first",
+      "group": "menus",
+      "value": "an alert (\"Delete Fonts?\") before deleting from a library, unless the saved choice skips it",
+      "source": "function 0x100021950 (-[RFFontPreviewViewController deleteFromLibraryMenuItemClicked:]), string 0x10028629d"
+    },
+    {
+      "name": "deleting a missing file",
+      "group": "menus",
+      "value": "no-such-file (code 4) is not reported as an error",
+      "source": "function 0x10011f3cc (-[RFLibraryHandler deleteFontFile:])"
+    },
+    {
+      "name": "library delete warning",
+      "group": "menus",
+      "value": "This will delete the library and all the fonts it contains.",
+      "source": "function 0x100118468 (-[RFLibraryHandler deleteLibrary]), string 0x10029a6f0"
+    },
+    {
+      "name": "VectorCraft font refresh command",
+      "group": "apps",
+      "value": "Type › Refresh Font List (text.rescanFonts), 28 languages",
+      "source": "VectorCraft binary strings: command description \"scan the system font folders again, for fonts installed or removed since the app started\" and its translation table (e.g. \"Actualizar lista de fuentes\")"
+    },
+    {
+      "name": "DesignCraft font reload command",
+      "group": "apps",
+      "value": "Type › Reload Fonts (font.reload)",
+      "source": "designcraft-cli commands: font.reload, menu [\"Type\"], \"scans the font folders again\""
+    },
+    {
+      "name": "ArtCraft apps read fonts",
+      "group": "apps",
+      "value": "when they open (PhotoCraft, PdfCraft, SolidCraft, TextureCraft: no command to read them again)",
+      "source": "binary strings (fontdb 0.23 in PhotoCraft/DesignCraft, font-folder paths); photocraft-cli type.fonts / designcraft-cli font.replace+font.list resolve fonts FontCraft registered (\"123 and...\", Roboto) as installed"
+    },
+    {
+      "name": "LibreOffice (macOS) reads fonts",
+      "group": "apps",
+      "value": "only when it opens",
+      "source": "no kCTFontManagerRegisteredFontsChangedNotification / NSFontSetChanged listener in any library of LibreOffice.app/Contents/Frameworks"
+    },
+    {
+      "name": "system accent colour",
+      "group": "look",
+      "value": "macOS NSColor.controlAccentColor; Windows HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\DWM AccentColor (ABGR); GNOME accent-color names; default accent = system",
+      "source": "person's request (system colours on every host)"
+    },
+    {
+      "name": "app icons",
+      "group": "look",
+      "value": "the person's SVGs (assets/icons/source): app A + butterfly + green asterisk, .fcl page with FCL band; light and dark; 6 % margin (app), 2 % (document); Android adaptive icon inside the 66/108 dp safe zone, night variant",
+      "source": "person's folder 'Iconos FontCraft'"
+    },
+    {
+      "name": "sidebar chosen row tint",
+      "group": "look",
+      "value": "black 0.06 (light) / white 0.09 (dark)",
+      "source": "function 0x1000c61c4 (-[RFNavigationItemRowView drawRect:]), constants 0x1002822a8 / 0x100282750"
+    },
+    {
+      "name": "sidebar hovered row tint",
+      "group": "look",
+      "value": "black 0.028 (light) / white 0.04 (dark)",
+      "source": "function 0x1000c61c4, constants 0x100282748 / 0x1002822a0"
+    },
+    {
+      "name": "sidebar drop-target outline",
+      "group": "look",
+      "value": "2.0 px controlAccentColor",
+      "source": "function 0x1000c61c4 (fmov d0, #2.0; controlAccentColor)"
+    },
+    {
+      "name": "tab button shape",
+      "group": "look",
+      "value": "corner radius = height * 0.5; chosen: controlAccentColor fill, white 13 pt text; others: white 0.92",
+      "source": "function 0x1000be314 (-[RFTabButton drawRect:]), constant 0x100282590 = 0.92, fmov d0, #13.0"
+    },
+    {
+      "name": "accent colour source",
+      "group": "look",
+      "value": "NSColor.controlAccentColor (16 call sites: tabs, sidebar, sliders, filter buttons, font rows)",
+      "source": "selector ref 0x100378220 → stub 0x100243b60, callers incl. 0x1000be314, 0x1000c61c4, 0x10003d8b0"
+    },
+    {
+      "name": "dark appearance test",
+      "group": "look",
+      "value": "effective appearance best match is DarkAqua, VibrantDark or a high-contrast dark",
+      "source": "function 0x1000e9858 (+[RFGlobals isDarkAppearance])"
+    },
+    {
+      "name": "follow system appearance default",
+      "group": "look",
+      "value": "on when never set",
+      "source": "function 0x1000a8d38 (-[RFPreferencesHandler enableSystemDefaultAppearance])"
+    },
+    {
+      "name": "reaction to fonts registered elsewhere",
+      "group": "apps",
+      "value": "none (empty handler)",
+      "source": "function 0x1000ddfbc (-[RFAppDelegate registeredFontsChangedNotification:])"
+    },
+    {
+      "name": "font request source",
+      "group": "apps",
+      "value": "CTFontManagerCreateFontRequestRunLoopSource(order 0, block) added to CFRunLoopGetMain; the block gets the font attributes (NSFontNameAttribute) and the asking pid and returns font descriptors",
+      "source": "function 0x10004ee84 (-[RFFontActivator startFontRequestRunLoopSource]), 0x10004f5b8 (receiveFontRequest), block type string '^{__CFArray=}20@?0^{__CFDictionary=}8i16'"
+    },
+    {
+      "name": "missing fonts message",
+      "group": "apps",
+      "value": "\"RightFont detected %lu missing %@ in this document.\" / \"%lu missing %@ activated\"",
+      "source": "function 0x10004faf8 (-[RFFontActivator handleMissingFonts:targetID:appName:]), strings 0x10028fc70, 0x10028f17b"
+    },
+    {
+      "name": "used-font scan script (QuarkXPress)",
+      "group": "apps",
+      "value": "tell document 1 … set usedFonts to font list → names joined by ##",
+      "source": "string 0x10028bb93 (target 11)"
+    },
+    {
+      "name": "temporary activation",
+      "group": "menus",
+      "value": "fonts activated temporarily are turned off when the app quits",
+      "source": "function 0x100072ea0 (-[RFFontService deactivateTemporarilyActivatedFonts]), strings 0x100286413 'Activate Temporarily', 0x10028f026"
+    },
+    {
+      "name": "export fonts",
+      "group": "menus",
+      "value": "Open panel for a folder (prompt 'Export', message 'Select the destination for the exported font files.'); a folder is made with its parents and each font file copied into it",
+      "source": "functions 0x100021294 (exportFontsMenuItemClicked:), 0x10007e218 (-[RFFontService exportFonts:toLocation:]), strings 0x1002861d9, 0x10028620d"
+    },
+    {
+      "name": "show in Finder",
+      "group": "menus",
+      "value": "Show in Finder (open -R)",
+      "source": "string 0x1002864d0"
+    },
+    {
+      "name": "interface text size",
+      "group": "look",
+      "value": "every interface text 1 pt larger than before (system body 14 pt, small 11.5 pt)",
+      "source": "person's request"
+    },
+    {
+      "name": "Ubuntu accents",
+      "group": "look",
+      "value": "orange #E95420, bark #787859, sage #657B69, olive #4B8501, viridian #03875B, prussian green #308280, blue #0073E5, purple #7764D8, magenta #B34CB3, red #DA3450 (dark panels: 22 % towards white)",
+      "source": "Ubuntu Yaru accent colours (person's request)"
+    },
+    {
+      "name": "Google Fonts hover preview",
+      "group": "look",
+      "value": "60 pt, whole alphabet, figures, accents and marks",
+      "source": "person's request"
+    },
+    {
+      "name": "system UI fonts never missing",
+      "group": "apps",
+      "value": "requested names starting with SFUIText, SFUIDisplay, SFCompact, SFProText, SFProDisplay, HelveticaNeueUI are skipped",
+      "source": "function 0x10004f89c (-[RFFontActivator handleRequestFonts]), strings 0x10028c1de, 0x10028c1e7, 0x10028c1f3, 0x10028c1fd, 0x10028c207, 0x10028c214"
+    },
+    {
+      "name": "requested names handled once per app",
+      "group": "apps",
+      "value": "names already handled for the asking app are skipped",
+      "source": "function 0x10004f89c (sets at self+0xd8 / self+0xe0 checked by target id)"
+    },
+    {
+      "name": "auto-activate requested fonts (default)",
+      "group": "apps",
+      "value": "on when never set",
+      "source": "function 0x1000a91e8 (-[RFPreferencesHandler enableAutoActivationFonts]), key EnableAutoActivationFonts 0x100290967"
+    },
+    {
+      "name": "show Missing Fonts alert (default)",
+      "group": "apps",
+      "value": "on when never set",
+      "source": "function 0x1000a9338 (-[RFPreferencesHandler showMissingFontsAlert]), key ShowMissingFontsAlert 0x1002909bd"
+    },
+    {
+      "name": "missing fonts handling",
+      "group": "apps",
+      "value": "fonts found in the catalog are activated for the app; with the alert on, the missing ones are listed in the Missing Fonts window, otherwise '%lu missing %@ activated' is posted",
+      "source": "function 0x10004faf8 (-[RFFontActivator handleMissingFonts:targetID:appName:])"
+    },
+    {
+      "name": "activation scope (FontCraft)",
+      "group": "activation",
+      "value": "session (3) instead of RightFont's persistent (2); every font FontCraft turned on goes off when its document closes, its app quits or FontCraft quits; leftovers from the persistent scope are taken off at start",
+      "source": "person's request (RightFont: 0x10004b974 uses persistent scope 2)"
+    },
+    {
+      "name": "details panel minimum width",
+      "group": "look",
+      "value": "4 × glyph size × 1.6 + 4 + 2 × 16 + 12 px (four glyph columns), at most 1000",
+      "source": "person's request; glyph cell = glyph size × 1.6 (panel.rs)"
+    },
+    {
+      "name": "copy wait (slow apps)",
+      "group": "apps",
+      "value": "until the copy is on the clipboard, up to 2 s, then 0.15 s for its rich versions; clipboard given back 1.2 s after pasting",
+      "source": "RightFont's 0.2 s (string 0x10028b730) lengthened for LibreOffice and ONLYOFFICE"
+    },
+    {
+      "name": "keep text size when changing font",
+      "group": "apps",
+      "value": "the app's own RTF is changed when it carries sizes (\\fs); otherwise its HTML (font-family / face changed)",
+      "source": "person's report (ONLYOFFICE changed the size)"
+    },
+    {
+      "name": "VectorCraft font change",
+      "group": "apps",
+      "value": "Cmd+Alt+Shift+F (Highlight Font Name, type.highlightFontName), type the family, Return",
+      "source": "VectorCraft program strings"
+    },
+    {
+      "name": "DesignCraft font change",
+      "group": "apps",
+      "value": "designcraft-cli app --port (DESIGNCRAFT_CONTROL_PORT or 7979) type.char {attrs:{fontFamily}}; else copy → swap → paste",
+      "source": "designcraft-cli commands / error text 'start it with designcraft --control 7979'"
+    },
+    {
+      "name": "native menus",
+      "group": "look",
+      "value": "right-click and pop-up menus are the system's own (macOS NSMenu with its icons, Windows Win32 menus) through muda; Linux/Android keep FontCraft's",
+      "source": "person's request (host system resources)"
+    },
+    {
+      "name": "drop-down arrow",
+      "group": "look",
+      "value": "macOS SF Symbol chevron.up.chevron.down on the accent square; Windows Segoe Fluent/MDL2 U+E70D; Linux icon theme pan-down-symbolic",
+      "source": "person's request (host system resources)"
+    },
+    {
+      "name": "one missing-font scan at a time",
+      "group": "apps",
+      "value": "busy flag; a scan asked for meanwhile is remembered and run when the current one finishes",
+      "source": "functions 0x10004dae4 (scanUsedFontsWithCommonCode:…: flag self+0x20, rescan flag self+0x21) and 0x10004d564 (-[RFFontActivator finishMissingFontScan])"
+    },
+    {
+      "name": "stop checking an app on these AppleScript errors",
+      "group": "apps",
+      "value": "-600, -609, -610, -1712, -1750, -2741",
+      "source": "function 0x10004d488 (-[RFFontActivator shouldStopMissingFontTimerForError:includeTargetNotRunning:]: compares code + 0x258/0x261/0x262/0x6b0/0x6d6/0xab5 with 0)"
+    },
+    {
+      "name": "auto-deactivate auto-activated fonts (RightFont default)",
+      "group": "activation",
+      "value": "off when never set (FontCraft: always on, the person's rule)",
+      "source": "function 0x1000a9518 (-[RFPreferencesHandler autoDeactivateAutoActivatedFonts]), key AutoDeactivateAutoActivatedFonts 0x1002909ea"
+    },
+    {
+      "name": "app quit detection",
+      "group": "apps",
+      "value": "NSWorkspaceDidTerminateApplicationNotification (FontCraft: the process list every 1.5 s)",
+      "source": "function 0x1000c0ddc (-[RFUIScenesRouter didTerminateApplicationNotification:])"
+    },
+    {
+      "name": "change font only with rich text on the clipboard",
+      "group": "apps",
+      "value": "RightFont changes the copied text's font only when the clipboard holds RTF (FontCraft also uses HTML, to keep sizes)",
+      "source": "function 0x10004c60c (-[RFFontActivator changeFontForRTF:]): on the main thread, types checked for RTF"
+    },
+    {
+      "name": "printer and paper from the installed default printer",
+      "group": "print",
+      "value": "Installed printers listed, default preselected; paper sizes and default paper are the chosen printer's (CUPS lpstat/lpoptions/PPD on macOS and Linux, System.Drawing PrinterSettings on Windows)",
+      "source": "host printing system"
+    },
+    {
+      "name": "wait for the app in front before copy/paste",
+      "group": "apps",
+      "value": "poll the front app every 100 ms up to 2000 ms, then 150 ms",
+      "source": "FontCraft rule (RightFont uses a fixed delay 0.1, string 0x10028b813)"
+    },
+    {
+      "name": "glyph typed, not pasted",
+      "group": "apps",
+      "value": "CGEventKeyboardSetUnicodeString in chunks of 20 UTF-16 units; paste only as fallback",
+      "source": "FontCraft rule (avoids smart-paste spaces)"
+    },
+    {
+      "name": "interface icons as SVG",
+      "group": "ui",
+      "value": "21 SVG icons, viewBox -10 -10 20 20, colour placeholder {c}, rendered with resvg",
+      "source": "FontCraft rule"
+    },
+    {
+      "name": "glyph copy is plain text only",
+      "group": "glyphs",
+      "value": "declareTypes:@[NSPasteboardTypeString] + setString:forType: — the character alone",
+      "source": "function 0x1000b7208 (-[RFFontGlyphViewController copy:])"
+    },
+    {
+      "name": "keystrokes to the app's process",
+      "group": "apps",
+      "value": "tell application process \"%@\" to keystroke \"c\"/\"v\" using command down; delay 0.2 after copy, 0.1 after activate",
+      "source": "strings 0x10028b730, 0x10028b813"
+    },
+    {
+      "name": "glyph view colours",
+      "group": "ui",
+      "value": "textBackgroundColor background, textColor glyph (FontCraft keeps the black background the person asked for)",
+      "source": "function 0x10008d54c"
+    },
+    {
+      "name": "slider knob",
+      "group": "ui",
+      "value": "fill controlBackgroundColor, stroke 2.0 secondaryLabelColor, 10.0 or 12.5 across",
+      "source": "function 0x100135fa8"
+    }
+  ]
+}

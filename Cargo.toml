@@ -1,0 +1,93 @@
+[package]
+name = "fontcraft"
+version = "0.1.0"
+edition = "2021"
+description = "FontCraft: browse, preview, print and switch on fonts"
+[[bin]]
+name = "FontCraft"
+path = "src/main.rs"
+
+# Ubuntu / Debian package (cargo deb), x64 and ARM64.
+[package.metadata.deb]
+name = "fontcraft"
+maintainer = "FontCraft"
+section = "graphics"
+priority = "optional"
+extended-description = "Browse, preview and switch on fonts; FontCraft libraries (.fcl)."
+depends = "libgtk-3-0, libxdo3, libayatana-appindicator3-1"
+assets = [
+    ["target/release/FontCraft", "usr/bin/fontcraft", "755"],
+    ["packaging/linux/fontcraft.desktop", "usr/share/applications/", "644"],
+    ["packaging/linux/fontcraft-library.xml", "usr/share/mime/packages/", "644"],
+    ["assets/icons/png/fontcraft-256.png", "usr/share/icons/hicolor/256x256/apps/fontcraft.png", "644"],
+    ["assets/icons/png/fontcraft-512.png", "usr/share/icons/hicolor/512x512/apps/fontcraft.png", "644"],
+    ["assets/icons/png/fontcraft-library-256.png", "usr/share/icons/hicolor/256x256/mimetypes/application-x-fontcraft-library.png", "644"],
+]
+
+# Fedora / openSUSE / RHEL package (cargo generate-rpm), x64 and ARM64.
+[package.metadata.generate-rpm]
+name = "fontcraft"
+summary = "Browse, preview and switch on fonts"
+license = "Proprietary"
+assets = [
+    { source = "target/release/FontCraft", dest = "/usr/bin/fontcraft", mode = "755" },
+    { source = "packaging/linux/fontcraft.desktop", dest = "/usr/share/applications/fontcraft.desktop", mode = "644" },
+    { source = "packaging/linux/fontcraft-library.xml", dest = "/usr/share/mime/packages/fontcraft-library.xml", mode = "644" },
+    { source = "assets/icons/png/fontcraft-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/fontcraft.png", mode = "644" },
+    { source = "assets/icons/png/fontcraft-library-256.png", dest = "/usr/share/icons/hicolor/256x256/mimetypes/application-x-fontcraft-library.png", mode = "644" },
+]
+
+[features]
+default = ["net"]
+# Downloading Google Fonts. Always on in real builds.
+net = ["dep:ureq"]
+
+[dependencies]
+eframe = "0.37"
+ttf-parser = "0.25"
+ab_glyph = "0.2"
+memmap2 = "0.9"
+plist = "1"
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# FontCraft's icons are drawn from the SVG files in assets/icons/source.
+resvg = { version = "0.49", default-features = false }
+# Reading the fonts used in Office and OpenDocument files (Missing Fonts).
+zip = { version = "9.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+raw-window-handle = "0.6"
+miniz_oxide = "0.9"
+
+# Desktop only (Android has no menu bar icon, global shortcut or file dialogs of this kind).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = "0.18"
+trash = "5"
+tray-icon = "0.26"
+global-hotkey = "0.10"
+
+# Secure downloads (Google Fonts): the system's own TLS on macOS and Windows (no C toolchain needed to
+# build for Windows), rustls on Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+ureq = { version = "3", default-features = false, features = ["gzip", "rustls"], optional = true }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["gzip", "native-tls"], optional = true }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[profile.dev]
+opt-level = 2
+
+# Binaries to hand out: fully optimised, smaller, without debug symbols.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+objc2 = { version = "0.6", features = ["exception"] }
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSData", "NSString", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSRunningApplication", "NSWindow", "NSPasteboard"] }

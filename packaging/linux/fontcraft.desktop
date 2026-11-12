@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=FontCraft
+Comment=Browse, preview and switch on fonts
+Exec=fontcraft %F
+Icon=fontcraft
+Categories=Graphics;Utility;
+MimeType=application/x-fontcraft-library;
+Terminal=false

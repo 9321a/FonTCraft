@@ -1,0 +1,13 @@
+FontCraft portátil (Windows x64)
+================================
+
+- No necesita instalación: abre fontcraft.exe.
+- Mientras exista el archivo "portable.txt" junto a fontcraft.exe, FontCraft guarda sus ajustes,
+  bibliotecas, favoritas y descargas de Google Fonts en la carpeta "FontCraftData" de esta misma
+  carpeta, así que puedes llevarla en una memoria USB a otro equipo.
+- Borra "portable.txt" si prefieres que use la carpeta normal del usuario (%APPDATA%\FontCraft).
+
+FontCraft portable (Windows x64)
+- No installation: open fontcraft.exe.
+- While "portable.txt" sits next to fontcraft.exe, settings, libraries, favourites and Google Fonts
+  downloads are kept in "FontCraftData" in this folder, so it can travel on a USB stick.

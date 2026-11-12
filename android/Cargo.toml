@@ -1,0 +1,80 @@
+# FontCraft for Android: the same code as the desktop app (../src), built as the library Android
+# loads (NativeActivity). Built from Linux with ../compilar-android.sh (cargo-apk).
+[package]
+name = "fontcraft-android"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "fontcraft"
+path = "../src/main.rs"
+crate-type = ["cdylib"]
+
+[features]
+default = ["net"]
+net = ["dep:ureq"]
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "android-native-activity"] }
+# The window library eframe uses, to hand it the Android app.
+winit = { version = "0.30", default-features = false, features = ["android-native-activity", "rwh_06"] }
+ttf-parser = "0.25"
+ab_glyph = "0.2"
+memmap2 = "0.9"
+plist = "1"
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# FontCraft's icons are drawn from the SVG files in assets/icons/source.
+resvg = { version = "0.49", default-features = false }
+# Reading the fonts used in Office and OpenDocument files (Missing Fonts).
+zip = { version = "9.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+raw-window-handle = "0.6"
+miniz_oxide = "0.9"
+# Google Fonts downloads over rustls (built with the Android NDK's compiler).
+ureq = { version = "3", default-features = false, features = ["gzip", "rustls"], optional = true }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[package.metadata.android]
+package = "app.fontcraft"
+apk_name = "FontCraft"
+# ARM64 phones and tablets, and Intel/AMD (x86_64) devices and emulators.
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+resources = "res"
+
+[package.metadata.android.sdk]
+# Android 12 (2021) or newer: systems from the last five years.
+min_sdk_version = 31
+target_sdk_version = 35
+
+[package.metadata.android.application]
+label = "FontCraft"
+icon = "@mipmap/ic_launcher"
+# Full screen: the system bar (network, battery, clock) is hidden.
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+orientation = "unspecified"
+config_changes = "orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+max_sdk_version = 32
+
+[package.metadata.android.signing.release]
+path = "/home/ancizar/.android/debug.keystore"
+keystore_password = "android"
+key_alias = "androiddebugkey"
+key_password = "android"
+
+# Listing the installed apps that set text in fonts (Auto Activation).
+[[package.metadata.android.uses_permission]]
+name = "android.permission.QUERY_ALL_PACKAGES"

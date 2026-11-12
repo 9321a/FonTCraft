@@ -1,0 +1,14 @@
+# Build output: made again by cargo and the build scripts (GitHub Actions makes the packages).
+/target/
+/android/target/
+/dist/
+# Editors and the Finder.
+.idea/
+.vscode/
+.DS_Store
+*.swp
+# Never commit signing keys.
+*.keystore
+*.jks
+*.p12
+*.pfx
