@@ -83,21 +83,34 @@ Paquetes que genera **FontCraft binaries**:
 | Linux 32 bits | ARMv7 (Raspberry Pi con sistema de 32 bits) | `.deb`, `.rpm`, `.tar.gz` | Ubuntu x64 con `cross` (si falla, no detiene lo demás) |
 | Android 12+ | ARM64 y x86_64 | `FontCraft-…-android.apk` | Ubuntu 24.04 |
 
-### Primera vez
+### Primera vez (con GitHub Desktop)
 
-1. Crea una cuenta en https://github.com y un repositorio nuevo (por ejemplo `fontcraft`).
-2. Sube el **contenido de la carpeta `app`** (no la carpeta del proyecto entero): el archivo `.gitignore`
-   ya deja fuera `target/`, `dist/` y `android/target/`, así que se suben unos 3 MB. Con GitHub Desktop:
-   *File › Add local repository…* › la carpeta `app` › *Publish repository*.
-3. En el repositorio: **Actions** › acepta activar los flujos si lo pregunta.
+La carpeta `app` ya es un repositorio de Git con su primera versión guardada (rama `main`), así que solo
+falta añadirla a GitHub Desktop y publicarla:
+
+1. En GitHub Desktop: **File › Add Local Repository…** › **Choose…** › elige la carpeta
+   `FontCraft/app` › **Add Repository**.
+2. Si aún no has entrado con tu cuenta: **GitHub Desktop › Settings… › Accounts › Sign in**.
+3. Pulsa **Publish repository** (arriba). Nombre: `fontcraft`.
+   - **Keep this code private** marcado: nadie más ve el código. GitHub Actions funciona igual, pero las
+     máquinas ARM de Linux pueden no estar en tu plan (ver Notas).
+   - Desmarcado (público): todas las máquinas, incluidas las ARM, sin coste.
+4. Cuando termine, **Repository › View on GitHub** abre la página del repositorio. Ve a la pestaña
+   **Actions**: el flujo *FontCraft check* ya se estará ejecutando con esa primera versión.
+
+### Cada vez que cambie algo
+
+GitHub Desktop muestra los archivos cambiados: escribe un resumen abajo a la izquierda, pulsa
+**Commit to main** y luego **Push origin**. *FontCraft check* se vuelve a ejecutar solo.
 
 ### Generar los paquetes
 
 - **A mano:** Actions › *FontCraft binaries* › **Run workflow**. Al terminar (unos 20–30 minutos), los
   archivos están al final de la página de esa ejecución, en *Artifacts* (se guardan 30 días).
-- **Publicar una versión:** sube el número en `Cargo.toml` (`version = "0.2.0"`), y crea la etiqueta
-  `v0.2.0` (GitHub Desktop: *History* › clic derecho en el último cambio › *Create Tag…* › *Push*). Se
-  genera todo y queda publicado en **Releases**.
+- **Publicar una versión:** sube el número en `Cargo.toml` (`version = "0.2.0"`) y haz *Commit* y *Push*.
+  Luego, en GitHub Desktop, pestaña **History** › clic derecho en ese cambio › **Create Tag…** › escribe
+  `v0.2.0` › **Create Tag**, y pulsa **Push origin** (sube la etiqueta). Se genera todo y queda publicado
+  en **Releases** con su `SHA256SUMS.txt`.
 
 ### Notas
 
