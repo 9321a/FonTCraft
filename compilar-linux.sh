@@ -5,17 +5,15 @@
 #   - FontCraft-<versión>-linux-<arquitectura>.tar.gz (programa, iconos, archivos de escritorio e install.sh)
 #
 # Uso:
-#   sh compilar-linux.sh           para este equipo (x64, ARM64 o ARMv7, lo detecta solo)
+#   sh compilar-linux.sh           para este equipo (x64 o ARM64, lo detecta solo)
 #   sh compilar-linux.sh arm64     Linux ARM de 64 bits (Raspberry Pi 4/5 con sistema de 64 bits, servidores ARM)
-#   sh compilar-linux.sh armhf     Linux ARM de 32 bits (ARMv7: Raspberry Pi con sistema de 32 bits)
 #   sh compilar-linux.sh x64       PC de 64 bits (Intel/AMD)
 # Para otra arquitectura que la del equipo usa "cross" (con Docker o Podman), que trae lo necesario;
 # Cross.toml le dice qué bibliotecas de Ubuntu añadir.
 #
 # Paquetes de Ubuntu que necesita para compilar en el propio equipo (una sola vez):
 #   build-essential pkg-config libgtk-3-dev libxdo-dev libayatana-appindicator3-dev
-# FONTCRAFT_NO_CROSS=1: for another architecture, build with cargo using the compiler and libraries
-# already installed for it (no Docker), as the GitHub Actions ARMv7 job does.
+# FONTCRAFT_NO_CROSS=1: para compilar con herramientas nativas preinstaladas sin Docker.
 set -e
 cd "$(dirname "$0")"
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -27,12 +25,11 @@ case "${1:-}" in
   "") TARGET="" ;;
   x64|amd64|x86_64) TARGET=x86_64-unknown-linux-gnu ;;
   arm64|aarch64) TARGET=aarch64-unknown-linux-gnu ;;
-  armhf|armv7|arm) TARGET=armv7-unknown-linux-gnueabihf ;;
-  *) echo "No conozco \"$1\". Usa: x64, arm64 o armhf."; exit 1 ;;
+  *) echo "No conozco \"$1\". Usa: x64 o arm64."; exit 1 ;;
 esac
 # Lo que pide el equipo mismo se compila directamente.
 case "$HOST:$TARGET" in
-  x86_64:x86_64-unknown-linux-gnu|aarch64:aarch64-unknown-linux-gnu|armv7l:armv7-unknown-linux-gnueabihf) TARGET="" ;;
+  x86_64:x86_64-unknown-linux-gnu|aarch64:aarch64-unknown-linux-gnu) TARGET="" ;;
 esac
 
 if [ -z "$TARGET" ]; then

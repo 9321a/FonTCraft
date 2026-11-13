@@ -38,17 +38,33 @@ fn render_svg(svg: &str, s: usize, margin: f32) -> Vec<u8> {
     out
 }
 
-/// The app icon on its own container, the way the systems draw app icons: a rounded square on
-/// Apple's icon grid (the body 824 of 1024 pixels, centred, corners 22.5% of the body), with a soft
-/// shadow below, a light (or dark) vertical gradient and a fine edge, and the drawing inside it. The
-/// Dock, the taskbar and the window list then show the same tile Finder does, light or dark.
+/// The app icon on its own container, adapted to the design language of each host OS:
+/// - macOS: rounded squircle on Apple's icon grid (824/1024, 22.5% radius), soft drop shadow, gradient.
+/// - iOS: squircle container (1000/1024, 22.5% radius), clean surface without drop shadow.
+/// - Windows: Fluent Design (880/1024, 12% radius), clean modern elevation.
+/// - Android: Material Design adaptive squircle/circle (900/1024, 26% radius).
+/// - Linux: GNOME / FreeDesktop HIG (860/1024, 18% radius).
+/// Scalable up to 512x512 pixels.
 fn render_tile(s: usize, dark: bool) -> Vec<u8> {
     use resvg::tiny_skia::{Color, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point, SpreadMode, Stroke, Transform};
     let sf = s as f32;
     let Some(mut pix) = Pixmap::new(s as u32, s as u32) else { return vec![0; s * s * 4] };
-    let body = sf * 824.0 / 1024.0;
+
+    let (body_ratio, radius_ratio, has_shadow, shadow_layers) = if cfg!(target_os = "macos") {
+        (824.0 / 1024.0, 0.225, true, 8)
+    } else if cfg!(target_os = "ios") {
+        (1000.0 / 1024.0, 0.225, false, 0)
+    } else if cfg!(target_os = "windows") {
+        (880.0 / 1024.0, 0.120, true, 3)
+    } else if cfg!(target_os = "android") {
+        (900.0 / 1024.0, 0.260, false, 0)
+    } else {
+        (860.0 / 1024.0, 0.180, true, 4)
+    };
+
+    let body = sf * body_ratio;
     let x0 = (sf - body) / 2.0;
-    let y0 = x0 - sf * 0.008;
+    let y0 = if has_shadow { x0 - sf * 0.008 } else { x0 };
     let rounded = |x: f32, y: f32, w: f32, h: f32, r: f32| {
         // A rounded rectangle with circular corners (k: the cubic handle for a quarter circle).
         let k = 0.5523 * r;
@@ -65,10 +81,10 @@ fn render_tile(s: usize, dark: bool) -> Vec<u8> {
         pb.close();
         pb.finish()
     };
-    let radius = body * 0.225;
-    // Shadow: a few widening, fading layers a little below the tile.
-    if s >= 32 {
-        for i in 0..8 {
+    let radius = body * radius_ratio;
+    // Shadow: a few widening, fading layers a little below the tile when the host OS uses drop shadows.
+    if has_shadow && s >= 32 {
+        for i in 0..shadow_layers {
             let grow = sf * 0.0035 * i as f32;
             if let Some(p) = rounded(x0 - grow, y0 + sf * 0.012 - grow + sf * 0.004, body + 2.0 * grow, body + 2.0 * grow, radius + grow) {
                 let mut paint = Paint::default();
@@ -94,7 +110,7 @@ fn render_tile(s: usize, dark: bool) -> Vec<u8> {
     line.anti_alias = true;
     line.set_color(edge);
     pix.stroke_path(&tile, &line, &Stroke { width: (sf / 512.0).max(0.5), ..Stroke::default() }, Transform::identity(), None);
-    // The drawing, inside the tile with room around it.
+    // The drawing, inside the tile with room around it (scaling up to 512x512).
     let inner = (body * 0.74).round().max(1.0) as usize;
     let art = render_svg(if dark { APP_DARK } else { APP_LIGHT }, inner, 0.0);
     if let Some(art_pix) = resvg::tiny_skia::Pixmap::from_vec(premultiply(art), resvg::tiny_skia::IntSize::from_wh(inner as u32, inner as u32).unwrap_or(resvg::tiny_skia::IntSize::from_wh(1, 1).unwrap())) {
@@ -132,9 +148,9 @@ pub fn render(kind: Kind, s: usize, dark: bool) -> Vec<u8> {
     }
 }
 
-/// The window/dock icon matching the system's look.
+/// The window/dock icon matching the system's look, rendered at full 512x512 resolution.
 pub fn window_icon(dark: bool) -> eframe::egui::IconData {
-    let s = 256;
+    let s = 512;
     eframe::egui::IconData { rgba: render(Kind::App, s, dark), width: s as u32, height: s as u32 }
 }
 
@@ -169,7 +185,8 @@ pub fn system_is_dark() -> bool {
         // Windows 10/11: AppsUseLightTheme = 0 is the dark look (the taskbar and windows).
         out("reg", &["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "/v", "AppsUseLightTheme"]).contains("0x0")
     } else if cfg!(target_os = "android") {
-        false
+        out("cmd", &["uimode"]).to_lowercase().contains("yes")
+            || out("settings", &["get", "secure", "ui_night_mode"]).trim() == "2"
     } else {
         // GNOME, Cinnamon, Budgie and others: the desktop's colour scheme, else a "-dark" GTK theme.
         let scheme = out("gsettings", &["get", "org.gnome.desktop.interface", "color-scheme"]);
@@ -265,6 +282,10 @@ pub fn make_android(res: &Path) -> std::io::Result<()> {
         w(&format!("mipmap-{dpi}"), "ic_launcher_foreground.png", png(&render_svg(APP_LIGHT, fs, 0.21), fs))?;
         w(&format!("mipmap-night-{dpi}"), "ic_launcher_foreground.png", png(&render_svg(APP_DARK, fs, 0.21), fs))?;
     }
+    // High-resolution 512x512 launcher / store icons (light and dark).
+    w("drawable-nodpi", "ic_launcher_512.png", png(&render(Kind::App, 512, false), 512))?;
+    w("drawable-night-nodpi", "ic_launcher_512.png", png(&render(Kind::App, 512, true), 512))?;
+    w("mipmap-xxxhdpi", "ic_launcher_512.png", png(&render(Kind::App, 512, false), 512))?;
     let adaptive = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <background android:drawable=\"@color/ic_launcher_background\"/>\n    <foreground android:drawable=\"@mipmap/ic_launcher_foreground\"/>\n    <monochrome android:drawable=\"@mipmap/ic_launcher_foreground\"/>\n</adaptive-icon>\n";
     w("mipmap-anydpi-v26", "ic_launcher.xml", adaptive.as_bytes().to_vec())?;
     let color = |c: &str| format!("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <color name=\"ic_launcher_background\">{c}</color>\n</resources>\n");

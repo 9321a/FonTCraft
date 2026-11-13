@@ -69,9 +69,12 @@ name = "android.permission.INTERNET"
 name = "android.permission.READ_EXTERNAL_STORAGE"
 max_sdk_version = 32
 
-# Signing: compilar-android.sh passes the key through CARGO_APK_RELEASE_KEYSTORE and
-# CARGO_APK_RELEASE_KEYSTORE_PASSWORD (the computer's debug key when no other is given), so no
-# path from one computer is written here.
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+max_sdk_version = 29
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.MANAGE_EXTERNAL_STORAGE"
 
 # Listing the installed apps that set text in fonts (Auto Activation).
 [[package.metadata.android.uses_permission]]

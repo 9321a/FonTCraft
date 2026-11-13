@@ -613,11 +613,22 @@ fn bundle_id(app: &Path) -> Option<String> {
 pub fn find_installed() -> Vec<InstalledApp> {
     let mut found: Vec<InstalledApp> = Vec::new();
     // Android: the installed apps that set text in fonts, from the package list (the app declares
-    // QUERY_ALL_PACKAGES so Android shows it every package). Android doesn't let one app turn
-    // fonts on for others, so they are listed for inserting characters (copied to paste there).
+    // QUERY_ALL_PACKAGES so Android shows it every package). FontCraft injects fonts into shared
+    // font folders and broadcasts events to ArtCraft and Android creative/office apps.
     #[cfg(target_os = "android")]
     {
         const ANDROID_APPS: &[(&str, &str)] = &[
+            ("VectorCraft", "ai.storyteller.vectorcraft"),
+            ("DesignCraft", "ai.storyteller.designcraft"),
+            ("PhotoCraft", "ai.storyteller.photocraft"),
+            ("WordCraft", "ai.storyteller.wordcraft"),
+            ("DeckCraft", "ai.storyteller.deckcraft"),
+            ("GridCraft", "ai.storyteller.gridcraft"),
+            ("FilmCraft", "ai.storyteller.filmcraft"),
+            ("PotCraft", "ai.storyteller.potcraft"),
+            ("SolidCraft", "io.tangencylabs.solidcraft"),
+            ("PdfCraft", "ai.storyteller.pdfcraft"),
+            ("TextureCraft", "ai.storyteller.texturecraft"),
             ("Microsoft Word", "com.microsoft.office.word"),
             ("Microsoft Excel", "com.microsoft.office.excel"),
             ("Microsoft PowerPoint", "com.microsoft.office.powerpoint"),

@@ -22,8 +22,8 @@ Linux tiene ahora también paquete `.rpm` (Fedora, openSUSE, RHEL y derivadas) a
 | macOS (Intel, Apple silicon o universal) | doble clic en `Compilar FontCraft.command` y elegir 1-4 | `FontCraft.app` y `FontCraft-…-macos-<arq>.zip` |
 | Windows x64 | doble clic en `compilar-windows.bat` (en un PC x64) o `compilar-windows.bat x64` | `…-windows-x64-portable.zip`, `…-windows-x64-setup.exe` |
 | Windows ARM64 | doble clic en `compilar-windows.bat` (en un PC ARM) o `compilar-windows.bat arm64` | `…-windows-arm64-portable.zip`, `…-windows-arm64-setup.exe` |
-| Linux x64 / ARM64 / ARMv7 | `sh compilar-linux.sh` (para el propio equipo) | `fontcraft_…_<arq>.deb`, `fontcraft-…<arq>.rpm`, `FontCraft-…-linux-<arq>.tar.gz` |
-| Linux ARM desde otro PC | `sh compilar-linux.sh arm64` o `sh compilar-linux.sh armhf` (o `x64`) | lo mismo, para esa arquitectura |
+| Linux x64 / ARM64 | `sh compilar-linux.sh` (para el propio equipo) | `fontcraft_…_<arq>.deb`, `fontcraft-…<arq>.rpm`, `FontCraft-…-linux-<arq>.tar.gz` |
+| Linux ARM desde otro PC | `sh compilar-linux.sh arm64` (o `x64`) | lo mismo, para esa arquitectura |
 | Android | `sh compilar-android.sh` (en Linux) | `FontCraft-…-android.apk` |
 
 ### ARM64 en cada sistema (resumen)
@@ -33,7 +33,6 @@ Linux tiene ahora también paquete `.rpm` (Fedora, openSUSE, RHEL y derivadas) a
 | macOS (Apple silicon: M1, M2, M3, M4…) | `Compilar FontCraft.command` → opción **2** (solo ARM64) o **4** (universal: Intel + ARM64). Se puede hacer desde un Mac Intel. Sin preguntar: `FONTCRAFT_ARCH=arm64 ./"Compilar FontCraft.command"` |
 | Windows en ARM (Snapdragon…) | en el PC ARM: doble clic en `compilar-windows.bat`; desde un PC x64: `compilar-windows.bat arm64` |
 | Linux ARM64 (Raspberry Pi 4/5 de 64 bits, servidores ARM) | en el equipo ARM: `sh compilar-linux.sh`; desde un PC x64: `sh compilar-linux.sh arm64` (con Docker o Podman) |
-| Linux ARM de 32 bits (ARMv7) | `sh compilar-linux.sh armhf` |
 | Android 12+ (teléfonos y tabletas ARM64, equipos x86_64) | en Linux: `sh compilar-android.sh` (un solo `.apk` para todos) |
 
 ### macOS
@@ -130,8 +129,8 @@ GitHub Desktop muestra los archivos cambiados: escribe un resumen abajo a la izq
 Se compiló aquí la app universal de macOS (`lipo -archs` → `x86_64 arm64`) y arranca en este Mac.
 
 `cargo check` pasa sin errores ni avisos para Windows x64 y ARM64 (`x86_64/aarch64-pc-windows-msvc`),
-Linux x64, ARM64 y ARMv7 (`x86_64/aarch64-unknown-linux-gnu`, `armv7-unknown-linux-gnueabihf`) y Android
-ARM64 (`aarch64-linux-android`, paquete `android/`). En Linux y Android se comprueba sin la parte de red,
+Linux x64 y ARM64 (`x86_64/aarch64-unknown-linux-gnu`) y Android
+ARM64 y x64 (`aarch64-linux-android`, `x86_64-linux-android`, paquete `android/`). En Linux y Android se comprueba sin la parte de red,
 porque su cifrado necesita los compiladores de esos sistemas. Enlazar los binarios finales requiere cada
 sistema (o el flujo de GitHub).
 

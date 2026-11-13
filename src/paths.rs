@@ -69,7 +69,17 @@ pub fn adobe_dir() -> PathBuf {
 pub fn font_roots() -> Vec<(PathBuf, u8)> {
     let h = home();
     if cfg!(target_os = "android") {
-        return vec![(PathBuf::from("/system/fonts"), 0), (PathBuf::from("/product/fonts"), 0), (h.join("fonts"), 2)];
+        return vec![
+            (PathBuf::from("/system/fonts"), 0),
+            (PathBuf::from("/product/fonts"), 0),
+            (PathBuf::from("/storage/emulated/0/Fonts"), 2),
+            (PathBuf::from("/sdcard/Fonts"), 2),
+            (PathBuf::from("/storage/emulated/0/Fonts/FontCraft"), 2),
+            (PathBuf::from("/sdcard/Fonts/FontCraft"), 2),
+            (PathBuf::from("/storage/emulated/0/Download/Fonts"), 2),
+            (PathBuf::from("/storage/emulated/0/Android/media/app.fontcraft/Fonts"), 2),
+            (h.join("fonts"), 2),
+        ];
     }
     if cfg!(target_os = "windows") {
         let windir = env_dir("WINDIR").unwrap_or_else(|| PathBuf::from("C:\\Windows"));

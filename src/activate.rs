@@ -22,7 +22,7 @@
 
 use std::path::Path;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 mod mac {
     use core_foundation::base::TCFType;
     use core_foundation::error::{CFError, CFErrorRef};
@@ -142,32 +142,126 @@ mod mac {
 /// Fonts earlier versions left on for good in the system (macOS persistent scope) are taken off;
 /// FontCraft turns on what it should itself. Other systems keep nothing on after a session.
 pub fn clear_leftovers(paths: &[std::path::PathBuf]) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     for p in paths {
         if mac::persistent(p) {
             mac::set(p, false);
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(not(target_os = "macos"), not(target_os = "ios")))]
     let _ = paths;
 }
 
 /// At start, before the fonts kept on are turned on again: what an earlier session or a crash left
-/// in FontCraft's user font folder (macOS) goes, except the files of `keep`.
+/// in FontCraft's user font folder (macOS/Android) goes, except the files of `keep`.
 pub fn sweep(keep: &[std::path::PathBuf]) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     mac::sweep(keep);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "android")]
+    android::sweep(keep);
+    #[cfg(all(not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
     let _ = keep;
+}
+
+#[cfg(target_os = "android")]
+mod android {
+    use std::path::{Path, PathBuf};
+
+    /// Folders where Android apps read fonts:
+    /// 1. Standard external font directory (/storage/emulated/0/Fonts and /sdcard/Fonts)
+    ///    used by Phonto, PixelLab, ArtCraft apps, Canva, video editors, etc.
+    /// 2. FontCraft subfolder in Fonts (/storage/emulated/0/Fonts/FontCraft).
+    /// 3. Download/Fonts (scoped-storage compatible).
+    /// 4. Android media folder (/storage/emulated/0/Android/media/app.fontcraft/Fonts).
+    /// 5. App private fonts directory as fallback.
+    pub fn font_dirs() -> Vec<PathBuf> {
+        let mut dirs = vec![
+            PathBuf::from("/storage/emulated/0/Fonts/FontCraft"),
+            PathBuf::from("/storage/emulated/0/Fonts"),
+            PathBuf::from("/sdcard/Fonts/FontCraft"),
+            PathBuf::from("/sdcard/Fonts"),
+            PathBuf::from("/storage/emulated/0/Download/Fonts"),
+            PathBuf::from("/storage/emulated/0/Android/media/app.fontcraft/Fonts"),
+        ];
+        let h = crate::paths::home();
+        if !h.as_os_str().is_empty() {
+            dirs.push(h.join("fonts"));
+        }
+        dirs
+    }
+
+    /// Injects (on) or removes a font so other applications on Android can use it.
+    pub fn set(path: &Path, on: bool) -> bool {
+        let mut placed = false;
+        let file_name = path.file_name();
+        for dir in font_dirs() {
+            if on {
+                if super::place_in(&dir, path) {
+                    placed = true;
+                    if let Some(name) = file_name {
+                        notify_file(&dir.join(name), true);
+                    }
+                }
+            } else {
+                if super::take_from(&dir, path) {
+                    placed = true;
+                    if let Some(name) = file_name {
+                        notify_file(&dir.join(name), false);
+                    }
+                }
+            }
+        }
+        // Broadcast custom intent so ArtCraft apps and listening receivers reload fonts
+        notify_apps(path, on);
+        placed
+    }
+
+    /// Notifies Android's MediaScanner that a font file was added or removed.
+    fn notify_file(target: &Path, on: bool) {
+        let _ = on;
+        let uri = format!("file://{}", target.display());
+        let _ = crate::paths::command("am")
+            .args(["broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", &uri])
+            .status();
+    }
+
+    /// Broadcasts font activation/deactivation event to ArtCraft suite and other Android apps.
+    fn notify_apps(path: &Path, on: bool) {
+        let action = if on { "app.fontcraft.FONT_ACTIVATED" } else { "app.fontcraft.FONT_DEACTIVATED" };
+        let p = path.to_string_lossy();
+        let _ = crate::paths::command("am")
+            .args(["broadcast", "-a", action, "--es", "font_path", &p])
+            .status();
+    }
+
+    /// Removes leftover activated fonts on startup, keeping only the desired ones.
+    pub fn sweep(keep: &[PathBuf]) {
+        let fc_dirs = [
+            PathBuf::from("/storage/emulated/0/Fonts/FontCraft"),
+            PathBuf::from("/sdcard/Fonts/FontCraft"),
+            PathBuf::from("/storage/emulated/0/Android/media/app.fontcraft/Fonts"),
+        ];
+        let wanted: Vec<std::ffi::OsString> = keep.iter().filter_map(|p| p.file_name().map(|n| n.to_os_string())).collect();
+        for dir in &fc_dirs {
+            let Ok(rd) = std::fs::read_dir(dir) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_file() && !wanted.iter().any(|w| *w == e.file_name()) {
+                    let _ = std::fs::remove_file(&p);
+                    notify_file(&p, false);
+                }
+            }
+        }
+    }
 }
 
 /// Load (`on`) or unload a font file for other apps. Returns whether it worked.
 pub fn set(path: &Path, on: bool) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         mac::set(path, on)
     }
-    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
     {
         // Linux: the file in ~/.local/share/fonts/FontCraft, then fontconfig reads it again. A hard
         // link (a real file there) when the font is on the same disk, so apps that read the font
@@ -186,8 +280,7 @@ pub fn set(path: &Path, on: bool) -> bool {
     }
     #[cfg(target_os = "android")]
     {
-        let _ = (path, on);
-        false
+        android::set(path, on)
     }
     #[cfg(target_os = "windows")]
     {
@@ -198,7 +291,6 @@ pub fn set(path: &Path, on: bool) -> bool {
 /// Puts the font file into a font folder: a hard link (same disk), else a symbolic link (Linux),
 /// else a copy (macOS and Windows: macOS and the apps that read the folders skip symbolic links).
 /// The name keeps the file's own; another font of that name gets a numbered one.
-#[cfg_attr(target_os = "android", allow(dead_code))]
 fn place_in(dir: &Path, path: &Path) -> bool {
     let Some(target) = slot(dir, path) else { return false };
     if target.exists() {
@@ -208,7 +300,7 @@ fn place_in(dir: &Path, path: &Path) -> bool {
         && (std::fs::hard_link(path, &target).is_ok() || {
             #[cfg(all(unix, not(target_os = "macos")))]
             {
-                std::os::unix::fs::symlink(path, &target).is_ok()
+                std::os::unix::fs::symlink(path, &target).is_ok() || std::fs::copy(path, &target).is_ok()
             }
             #[cfg(any(not(unix), target_os = "macos"))]
             {
@@ -218,7 +310,7 @@ fn place_in(dir: &Path, path: &Path) -> bool {
 }
 
 /// Takes the font's file out of the font folder again.
-#[cfg_attr(any(target_os = "macos", target_os = "android"), allow(dead_code))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn take_from(dir: &Path, path: &Path) -> bool {
     match slot(dir, path) {
         Some(t) if t.exists() || t.symlink_metadata().is_ok() => std::fs::remove_file(&t).is_ok(),
