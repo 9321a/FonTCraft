@@ -167,7 +167,7 @@ pub fn set(path: &Path, on: bool) -> bool {
     {
         mac::set(path, on)
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
     {
         // Linux: the file in ~/.local/share/fonts/FontCraft, then fontconfig reads it again. A hard
         // link (a real file there) when the font is on the same disk, so apps that read the font
@@ -183,6 +183,11 @@ pub fn set(path: &Path, on: bool) -> bool {
         let _ = crate::paths::command("fc-cache").arg("-f").arg(&parent).status();
         let _ = crate::paths::command("touch").arg(&parent).arg(&dir).status();
         ok
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = (path, on);
+        false
     }
     #[cfg(target_os = "windows")]
     {

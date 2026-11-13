@@ -440,8 +440,8 @@ impl App {
             members: Vec::new(),
             lib_collapsed: HashSet::new(),
             gf: gfonts::GState { open: std::env::var("FONTCRAFT_GOOGLE").is_ok(), ..Default::default() },
-            left_open: std::env::var("FONTCRAFT_LEFT").as_deref() != Ok("closed"),
-            right_open: std::env::var("FONTCRAFT_RIGHT").as_deref() != Ok("closed"),
+            left_open: !cfg!(target_os = "android") && std::env::var("FONTCRAFT_LEFT").as_deref() != Ok("closed"),
+            right_open: !cfg!(target_os = "android") && std::env::var("FONTCRAFT_RIGHT").as_deref() != Ok("closed"),
             recording_hotkey: false,
             import_dlg: if std::env::var("FONTCRAFT_IMPORT_FONTS").is_ok() { Some(importdlg::ImportDlg::default()) } else { None },
             autoact: autoact::AutoAct::default(),
@@ -2294,15 +2294,14 @@ fn main() -> eframe::Result<()> {
 #[cfg(target_os = "android")]
 #[no_mangle]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
-    use winit::platform::android::EventLoopBuilderExtAndroid;
     if let Some(dir) = app.internal_data_path() {
         std::env::set_var("HOME", dir);
     }
     let options = eframe::NativeOptions {
-        event_loop_builder: Some(Box::new(move |builder| {
-            builder.with_android_app(app);
-        })),
+        android_app: Some(app),
         ..Default::default()
     };
-    let _ = eframe::run_native("FontCraft", options, Box::new(|cc| Ok(Box::new(App::new(cc, None)))));
+    if let Err(e) = eframe::run_native("FontCraft", options, Box::new(|cc| Ok(Box::new(App::new(cc, None))))) {
+        eprintln!("FontCraft Android error: {e}");
+    }
 }
