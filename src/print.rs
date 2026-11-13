@@ -27,7 +27,7 @@ pub struct PrintDlg {
     printer: Option<usize>,
     /// The printers, or one printer's papers, being read in the background.
     loading: Option<Arc<Mutex<Option<Loaded>>>>,
-    job: Option<Arc<Mutex<Option<Result<PathBuf, String>>>>>,
+    job: Option<Arc<Mutex<Option<Result<Done, String>>>>>,
     error: Option<String>,
 }
 
@@ -576,17 +576,45 @@ struct PrintSettings {
     paper: Paper,
 }
 
-/// Opens the system's print dialog for a PDF.
-fn print_pdf(path: &std::path::Path) -> Result<(), String> {
+/// A laid-out catalog: its PDF and its pages.
+struct Done {
+    path: PathBuf,
+    #[cfg_attr(any(target_os = "macos", target_os = "android"), allow(dead_code))]
+    pages: Vec<Page>,
+    #[cfg_attr(any(target_os = "macos", target_os = "android"), allow(dead_code))]
+    paper: Paper,
+}
+
+/// Opens the system's own print dialog: macOS's print panel for the PDF; on Windows and Linux the
+/// system's Print dialog (comdlg32, GTK) printing the pages themselves (printsys.rs); where that
+/// can't open, the PDF in the default viewer.
+fn print_pdf(done: Done) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        mac::print(path)
+        mac::print(&done.path)
     }
+    #[cfg(any(target_os = "windows", all(target_os = "linux", not(target_os = "android"))))]
+    {
+        let sheets: Vec<crate::printsys::Sheet> = done.pages.into_iter().map(|p| crate::printsys::Sheet { w: p.w, h: p.h, px: p.px }).collect();
+        match crate::printsys::print(sheets, done.paper.w, done.paper.h, "FontCraft") {
+            Ok(()) => Ok(()),
+            Err(_) => open_with_viewer(&done.path),
+        }
+    }
+    #[cfg(target_os = "android")]
+    {
+        open_with_viewer(&done.path)
+    }
+}
+
+/// The PDF in the default viewer (which has Print).
+#[cfg(not(target_os = "macos"))]
+fn open_with_viewer(path: &std::path::Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        crate::paths::command("cmd").args(["/C", "start", "", "/print"]).arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
+        crate::paths::command("cmd").args(["/C", "start", ""]).arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(not(target_os = "windows"))]
     {
         crate::paths::command("xdg-open").arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
@@ -688,9 +716,9 @@ impl App {
         if let Some(job) = &dlg.job {
             let done = job.lock().unwrap().take();
             match done {
-                Some(Ok(path)) => {
+                Some(Ok(done)) => {
                     dlg.job = None;
-                    match print_pdf(&path) {
+                    match print_pdf(done) {
                         Ok(()) => return,
                         Err(e) => dlg.error = Some(t(K::PrintFailed).replace("{err}", &e)),
                     }
@@ -837,7 +865,8 @@ impl App {
             std::thread::spawn(move || {
                 let pages = lay_out(&entries, &settings);
                 let path = std::env::temp_dir().join("FontCraft Catalog.pdf");
-                let r = write_pdf(&pages, &settings.paper, &path).map(|_| path).map_err(|e| e.to_string());
+                let paper = settings.paper.clone();
+                let r = write_pdf(&pages, &settings.paper, &path).map(|_| Done { path, pages, paper }).map_err(|e| e.to_string());
                 *out.lock().unwrap() = Some(r);
             });
             dlg.job = Some(job);

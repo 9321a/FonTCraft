@@ -35,6 +35,10 @@ mod watch;
 mod glyphtools;
 mod dragout;
 mod print;
+#[cfg(any(target_os = "windows", all(target_os = "linux", not(target_os = "android"))))]
+mod printsys;
+#[cfg(any(target_os = "windows", all(target_os = "linux", not(target_os = "android"))))]
+mod winauto;
 mod appicon;
 mod oslook;
 mod gfonts;
@@ -2256,6 +2260,23 @@ fn main() -> eframe::Result<()> {
     }
     #[allow(unused_mut)]
     let mut options = eframe::NativeOptions { viewport, ..Default::default() };
+    // The graphics device asks only for what FontCraft draws with (2D textures up to what the GPU
+    // offers, at most 8192): small GPUs (Raspberry Pi, other ARM boards) refused the default
+    // request ("max_texture_dimension_3d requested 2048, allowed 512").
+    #[cfg(not(target_os = "android"))]
+    {
+        use eframe::egui_wgpu::{wgpu, WgpuSetup, WgpuSetupCreateNew};
+        options.wgpu_options.wgpu_setup = WgpuSetup::CreateNew(WgpuSetupCreateNew {
+            device_descriptor: std::sync::Arc::new(|adapter: &wgpu::Adapter| {
+                let have = adapter.limits();
+                let base = if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::downlevel_defaults() };
+                let mut limits = base.using_resolution(have.clone()).using_alignment(have.clone());
+                limits.max_texture_dimension_2d = have.max_texture_dimension_2d.min(8192);
+                wgpu::DeviceDescriptor { label: Some("FontCraft"), required_limits: limits, ..Default::default() }
+            }),
+            ..WgpuSetupCreateNew::without_display_handle()
+        });
+    }
     // macOS: the app doesn't come to the front either.
     #[cfg(target_os = "macos")]
     if screenshot.is_some() {

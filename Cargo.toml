@@ -15,6 +15,8 @@ section = "graphics"
 priority = "optional"
 extended-description = "Browse, preview and switch on fonts; FontCraft libraries (.fcl)."
 depends = "libgtk-3-0, libxdo3, libayatana-appindicator3-1"
+# Typing glyphs into other apps (X11).
+recommends = "xdotool"
 assets = [
     ["target/release/FontCraft", "usr/bin/fontcraft", "755"],
     ["packaging/linux/fontcraft.desktop", "usr/share/applications/", "644"],
@@ -67,6 +69,8 @@ global-hotkey = "0.10"
 # Secure downloads (Google Fonts): the system's own TLS on macOS and Windows (no C toolchain needed to
 # build for Windows), rustls on Linux.
 [target.'cfg(target_os = "linux")'.dependencies]
+# GTK's print dialog (already used underneath by the file dialogs and the tray icon).
+gtk = "0.18"
 ureq = { version = "3", default-features = false, features = ["gzip", "rustls"], optional = true }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]

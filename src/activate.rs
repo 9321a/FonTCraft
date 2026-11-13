@@ -62,13 +62,11 @@ mod mac {
     pub fn set(path: &Path, on: bool) -> bool {
         let dir = folder();
         if on {
-            // The file in the user's font folder, registered from there; the original stays off.
-            if super::place_in(&dir, path) {
-                if let Some(placed) = super::slot(&dir, path) {
-                    register(path, false);
-                    return register(&placed, true);
-                }
-            }
+            // The original is registered with CoreText right away, as RightFont does (0x10004b974)
+            // and as FontCraft did when Affinity and the Apple apps took the font at once; a link
+            // in the user's font folder is left beside it for the apps that only read the font
+            // folders (ArtCraft's fontdb, fontconfig apps), which macOS also picks up by itself.
+            super::place_in(&dir, path);
             return register(path, true);
         }
         // Off: the placed file and the original, whichever is registered.
@@ -293,7 +291,7 @@ mod win {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    /// A font turned on goes into ~/Library/Fonts/FontCraft (registered from there, once) and
+    /// A font turned on is registered and linked into ~/Library/Fonts/FontCraft, and its link
     /// comes out again when turned off. Uses a downloaded Google font when there is one.
     #[test]
     fn on_and_off_through_the_user_font_folder() {

@@ -1626,6 +1626,23 @@ impl App {
         let name = def.name.to_string();
         // Apps that can't take a font from FontCraft (and every app outside macOS, where there are
         // no AppleScript or keystrokes to send): the font is turned on, and the person picks it there.
+        // Windows: the selection's font is changed with copy, swap and paste (winauto.rs), with the
+        // family name Windows apps use.
+        #[cfg(target_os = "windows")]
+        if def.how() != How::Activate && !def.win.is_empty() {
+            let family = self.lib.faces[face].family.clone();
+            let (exes, bundle) = (def.win, def.bundle.to_string());
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(400));
+                let outcome = match crate::winauto::apply_font(exes, &family) {
+                    Ok(true) => Outcome::Applied(name, None),
+                    Ok(false) => Outcome::NoSelection(name),
+                    Err(_) => Outcome::Activated(name, family),
+                };
+                pending.lock().unwrap().push((turned, bundle, outcome));
+            });
+            return;
+        }
         if !cfg!(target_os = "macos") || def.how() == How::Activate {
             let family = self.lib.faces[face].family.clone();
             pending.lock().unwrap().push((turned, def.bundle.to_string(), Outcome::Activated(name, family)));
@@ -1672,7 +1689,36 @@ impl App {
         let font = self.face_names(face, def.ps_names);
         let pending = self.autoact.pending.clone();
         let name = def.name.to_string();
-        // Outside macOS: the character goes on the clipboard, ready to paste in the app.
+        // Windows and Linux (X11): the glyph is typed into the app's window (winauto.rs), and on
+        // Windows its font set with copy, swap and paste; when the app's window isn't found (or on
+        // Wayland), it goes on the clipboard, ready to paste.
+        #[cfg(any(target_os = "windows", all(target_os = "linux", not(target_os = "android"))))]
+        {
+            let exes: &'static [&'static str] = if cfg!(target_os = "windows") { def.win } else { def.linux };
+            if !exes.is_empty() {
+                let family = self.lib.faces[face].family.clone();
+                let bundle = def.bundle.to_string();
+                let set_font = def.how() != How::Activate;
+                let text = ch.to_string();
+                self.clip = Some(text.clone());
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(250));
+                    let typed = crate::winauto::insert(exes, &text);
+                    #[cfg(target_os = "windows")]
+                    if typed && set_font {
+                        std::thread::sleep(Duration::from_millis(150));
+                        crate::winauto::select_back(text.encode_utf16().count());
+                        let _ = crate::winauto::apply_font(exes, &family);
+                        crate::winauto::caret_right();
+                    }
+                    let _ = (set_font, &family);
+                    let outcome = if typed { Outcome::Inserted(name) } else { Outcome::Activated(name, String::new()) };
+                    pending.lock().unwrap().push((turned, bundle, outcome));
+                });
+                return;
+            }
+        }
+        // Elsewhere: the character goes on the clipboard, ready to paste in the app.
         if !cfg!(target_os = "macos") {
             self.clip = Some(ch.to_string());
             self.notice = Some(i18n::tr(lang, K::CopiedForApp).replace("{c}", &ch.to_string()).replace("{app}", &name));
