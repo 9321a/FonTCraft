@@ -38,6 +38,19 @@ rustup target add aarch64-linux-android x86_64-linux-android
 command -v cargo-apk >/dev/null 2>&1 || cargo install cargo-apk
 
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+# The key the .apk is signed with: the one given in CARGO_APK_RELEASE_KEYSTORE (and its password),
+# else this computer's Android debug key, made the first time (as Android Studio makes it).
+if [ -z "$CARGO_APK_RELEASE_KEYSTORE" ]; then
+  KS="$HOME/.android/debug.keystore"
+  if [ ! -f "$KS" ]; then
+    mkdir -p "$HOME/.android"
+    keytool -genkeypair -v -keystore "$KS" -storepass android -keypass android -alias androiddebugkey \
+      -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" >/dev/null
+  fi
+  export CARGO_APK_RELEASE_KEYSTORE="$KS"
+  export CARGO_APK_RELEASE_KEYSTORE_PASSWORD="android"
+fi
+command -v keytool >/dev/null 2>&1 || [ -f "$CARGO_APK_RELEASE_KEYSTORE" ] || { echo "Falta Java (keytool) para firmar el .apk."; exit 1; }
 (cd android && cargo apk build --release)
 mkdir -p dist
 cp android/target/release/apk/FontCraft.apk "dist/FontCraft-$VERSION-android.apk"
