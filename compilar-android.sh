@@ -19,8 +19,14 @@ command -v cargo >/dev/null 2>&1 || { echo "No encuentro Rust (cargo). Instálal
 # El SDK y el NDK de Android.
 ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
 [ -d "$ANDROID_HOME" ] || { echo "No encuentro el SDK de Android. Define ANDROID_HOME (ahora: $ANDROID_HOME)."; exit 1; }
-if [ -z "$ANDROID_NDK_ROOT" ]; then
-  ANDROID_NDK_ROOT=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)
+# Without ANDROID_NDK_ROOT, or with one that doesn't exist: the NDK inside the SDK (26.3, the one
+# FontCraft is built with, when it's there; else the newest).
+if [ -z "$ANDROID_NDK_ROOT" ] || [ ! -d "$ANDROID_NDK_ROOT" ]; then
+  if [ -d "$ANDROID_HOME/ndk/26.3.11579264" ]; then
+    ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.3.11579264"
+  else
+    ANDROID_NDK_ROOT=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)
+  fi
 fi
 [ -d "$ANDROID_NDK_ROOT" ] || { echo "No encuentro el NDK de Android. Instálalo con el SDK Manager o define ANDROID_NDK_ROOT."; exit 1; }
 export ANDROID_HOME ANDROID_SDK_ROOT="$ANDROID_HOME" ANDROID_NDK_ROOT ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
