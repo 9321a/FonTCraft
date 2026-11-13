@@ -107,6 +107,9 @@ GitHub Desktop muestra los archivos cambiados: escribe un resumen abajo a la izq
 
 - **A mano:** Actions › *FontCraft binaries* › **Run workflow**. Al terminar (unos 20–30 minutos), los
   archivos están al final de la página de esa ejecución, en *Artifacts* (se guardan 30 días).
+- **Después de corregir algo, siempre una ejecución nueva:** *Run workflow* otra vez. Los botones
+  *Re-run jobs* / *Re-run failed jobs* de una ejecución anterior repiten aquella versión del proyecto
+  (la que había cuando se lanzó), así que no incluyen los arreglos subidos después.
 - **Publicar una versión:** sube el número en `Cargo.toml` (`version = "0.2.0"`) y haz *Commit* y *Push*.
   Luego, en GitHub Desktop, pestaña **History** › clic derecho en ese cambio › **Create Tag…** › escribe
   `v0.2.0` › **Create Tag**, y pulsa **Push origin** (sube la etiqueta). Se genera todo y queda publicado
