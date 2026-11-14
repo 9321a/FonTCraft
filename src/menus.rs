@@ -581,14 +581,14 @@ impl App {
                 // RightFont: an Open panel for a folder, "Select the destination for the exported
                 // font files." (0x100021294); the files are copied into a folder named after the font,
                 // made with its parents (-[RFFontService exportFonts:toLocation:], 0x10007e218).
-                #[cfg(not(target_os = "android"))]
+                #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
                 if let Some(dir) = rfd::FileDialog::new().set_title(t(K::ExportPrompt)).pick_folder() {
                     self.notice = Some(match crate::fcl::export_fonts(&dir, &name, &files) {
                         Ok((n, to)) => t(K::ExportedN).replace("{n}", &n.to_string()).replace("{dir}", &to.display().to_string()),
                         Err(e) => e,
                     });
                 }
-                #[cfg(target_os = "android")]
+                #[cfg(any(target_os = "android", target_os = "ios"))]
                 let _ = (name, files);
             }
             MenuAction::Reveal(path) => crate::paths::reveal(&path),

@@ -12,6 +12,7 @@ abajo, o automáticamente en GitHub con `.github/workflows/binaries.yml`.
 | Windows | 10 22H2 (2022) y 11 | x64 y ARM64 |
 | Linux | Ubuntu 22.04, Debian 12, Mint 21, Fedora 38, openSUSE Leap 15.5, RHEL 9 (o más nuevos) | x64 y ARM64 (ARMv7 solo a mano) |
 | Android | 12 (2021) | ARM64 y x86_64 |
+| iPadOS / iOS | 15.0 (2021) | ARM64 (iPad y iPhone) |
 
 Linux tiene ahora también paquete `.rpm` (Fedora, openSUSE, RHEL y derivadas) además de `.deb` y `.tar.gz`.
 
@@ -25,6 +26,7 @@ Linux tiene ahora también paquete `.rpm` (Fedora, openSUSE, RHEL y derivadas) a
 | Linux x64 / ARM64 | `sh compilar-linux.sh` (para el propio equipo) | `fontcraft_…_<arq>.deb`, `fontcraft-…<arq>.rpm`, `FontCraft-…-linux-<arq>.tar.gz` |
 | Linux ARM desde otro PC | `sh compilar-linux.sh arm64` (o `x64`) | lo mismo, para esa arquitectura |
 | Android | `sh compilar-android.sh` (en Linux) | `FontCraft-…-android.apk` |
+| iPadOS / iOS | `sh compilar-ipados.sh` o `Compilar FontCraft.command` (opción 5) | `FontCraft-…-ipados.ipa`, `FontCraft-Fonts.mobileconfig` |
 
 ### ARM64 en cada sistema (resumen)
 
@@ -69,7 +71,7 @@ El proyecto trae dos flujos en `.github/workflows/`:
 
 | Flujo | Cuándo se ejecuta | Qué hace |
 |---|---|---|
-| **FontCraft check** (`check.yml`) | en cada cambio subido a la rama `main` y en cada *pull request* | pasa las pruebas en macOS, Windows y Linux, y comprueba que compila para Android |
+| **FontCraft check** (`check.yml`) | en cada cambio subido a la rama `main` y en cada *pull request* | pasa las pruebas en macOS, Windows y Linux, y comprueba que compila para Android e iPadOS |
 | **FontCraft binaries** (`binaries.yml`) | a mano, o al crear una etiqueta `v…` (por ejemplo `v0.1.0`) | genera todos los paquetes (tabla de abajo); con una etiqueta los publica en una *Release* con `SHA256SUMS.txt` |
 
 Paquetes que genera **FontCraft binaries**:
@@ -81,6 +83,7 @@ Paquetes que genera **FontCraft binaries**:
 | Linux (Ubuntu 22.04+, Debian 12+, Fedora 38+…) | x64 y ARM64 | `.deb`, `.rpm`, `.tar.gz` | Ubuntu 22.04 x64 y Ubuntu 22.04 ARM |
 | Linux 32 bits | ARMv7 (Raspberry Pi con sistema de 32 bits) | `.deb`, `.rpm`, `.tar.gz` | Ubuntu x64 con `cross` (si falla, no detiene lo demás) |
 | Android 12+ | ARM64 y x86_64 | `FontCraft-…-android.apk` | Ubuntu 24.04 |
+| iPadOS 15+ | ARM64 (iPad y iPhone) | `FontCraft-…-ipados.ipa`, `FontCraft-Fonts.mobileconfig` | macOS |
 
 ### Primera vez (con GitHub Desktop)
 

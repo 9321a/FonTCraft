@@ -155,14 +155,14 @@ pub fn reveal(path: &std::path::Path) {
 /// Returns how many went.
 pub fn move_to_trash(items: &[PathBuf]) -> Result<usize, String> {
     let existing: Vec<&PathBuf> = items.iter().filter(|p| p.exists()).collect();
-    #[cfg(not(target_os = "android"))]
+    #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
     {
         trash::delete_all(&existing).map_err(|e| e.to_string())?;
         Ok(existing.len())
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = existing;
-        Err("no Trash on Android".into())
+        Err("no Trash on mobile".into())
     }
 }

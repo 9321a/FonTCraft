@@ -1,6 +1,6 @@
 # FontCraft
 
-Gestor de fuentes para macOS, Windows, Linux y Android: explora, previsualiza, imprime y activa fuentes,
+Gestor de fuentes para macOS, Windows, Linux, Android e iPadOS: explora, previsualiza, imprime y activa fuentes,
 con bibliotecas (`.fcl`), carpetas, listas inteligentes, Google Fonts y activación automática para las
 apps de diseño.
 

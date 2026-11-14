@@ -30,9 +30,11 @@ mod mac {
     use std::path::Path;
 
     /// kCTFontManagerScopeSession: on until FontCraft turns it off, at the latest until logout.
+    #[allow(dead_code)]
     const SCOPE_SESSION: u32 = 3;
     /// kCTFontManagerScopePersistent (RightFont's, 0x10004b974): what earlier FontCraft versions used.
     const SCOPE_PERSISTENT: u32 = 2;
+    #[allow(dead_code)]
     const SCOPE_NONE: u32 = 0;
     const ALREADY_REGISTERED: isize = 105;
     const NOT_REGISTERED: isize = 201;
@@ -41,8 +43,11 @@ mod mac {
     extern "C" {
         fn CTFontManagerRegisterFontsForURL(url: CFURLRef, scope: u32, error: *mut CFErrorRef) -> u8;
         fn CTFontManagerUnregisterFontsForURL(url: CFURLRef, scope: u32, error: *mut CFErrorRef) -> u8;
+        #[cfg(target_os = "macos")]
         fn CTFontManagerGetScopeForURL(url: CFURLRef) -> u32;
+        #[cfg(target_os = "macos")]
         fn CTFontManagerCreateFontDescriptorsFromURL(url: *const std::ffi::c_void) -> *const std::ffi::c_void;
+        #[cfg(target_os = "macos")]
         fn CTFontManagerEnableFontDescriptors(descriptors: *const std::ffi::c_void, enable: u8);
     }
 
@@ -54,9 +59,16 @@ mod mac {
         }
     }
 
-    /// ~/Library/Fonts/FontCraft: read by every app, CoreText's or not.
+    /// User fonts folder: ~/Library/Fonts/FontCraft on macOS; Documents/Fonts on iOS.
     pub fn folder() -> std::path::PathBuf {
-        crate::paths::home().join("Library/Fonts/FontCraft")
+        #[cfg(target_os = "macos")]
+        {
+            crate::paths::home().join("Library/Fonts/FontCraft")
+        }
+        #[cfg(target_os = "ios")]
+        {
+            crate::paths::home().join("Documents/Fonts")
+        }
     }
 
     pub fn set(path: &Path, on: bool) -> bool {
@@ -94,48 +106,66 @@ mod mac {
         }
     }
 
-    /// Registers (session scope) or unregisters one file with CoreText.
+    /// Registers or unregisters one file with CoreText.
     fn register(path: &Path, on: bool) -> bool {
         let Some(url) = CFURL::from_path(path, false) else { return false };
         let u = url.as_concrete_TypeRef();
-        let current = unsafe { CTFontManagerGetScopeForURL(u) };
         let mut err: CFErrorRef = std::ptr::null_mut();
-        if on {
-            if current == SCOPE_SESSION {
-                return true;
-            }
-            if current != SCOPE_NONE {
-                // Registered some other way: take it off that scope first, as RightFont does.
-                unsafe { CTFontManagerUnregisterFontsForURL(u, current, std::ptr::null_mut()) };
-            }
-            let ok = unsafe { CTFontManagerRegisterFontsForURL(u, SCOPE_SESSION, &mut err) } != 0;
-            let ok = ok || error_code(err) == Some(ALREADY_REGISTERED);
-            // Then its faces are enabled, as RightFont does right after registering
-            // (0x10004b974: CTFontManagerEnableFontDescriptors(descriptors, true)): a font the
-            // person had disabled in Font Book is usable again while FontCraft keeps it on.
-            if ok {
-                unsafe {
-                    let descs = CTFontManagerCreateFontDescriptorsFromURL(u as *const std::ffi::c_void);
-                    if !descs.is_null() {
-                        CTFontManagerEnableFontDescriptors(descs, 1);
-                        core_foundation::base::CFRelease(descs);
+        #[cfg(target_os = "macos")]
+        {
+            let current = unsafe { CTFontManagerGetScopeForURL(u) };
+            if on {
+                if current == SCOPE_SESSION {
+                    return true;
+                }
+                if current != SCOPE_NONE {
+                    // Registered some other way: take it off that scope first, as RightFont does.
+                    unsafe { CTFontManagerUnregisterFontsForURL(u, current, std::ptr::null_mut()) };
+                }
+                let ok = unsafe { CTFontManagerRegisterFontsForURL(u, SCOPE_SESSION, &mut err) } != 0;
+                let ok = ok || error_code(err) == Some(ALREADY_REGISTERED);
+                if ok {
+                    unsafe {
+                        let descs = CTFontManagerCreateFontDescriptorsFromURL(u as *const std::ffi::c_void);
+                        if !descs.is_null() {
+                            CTFontManagerEnableFontDescriptors(descs, 1);
+                            core_foundation::base::CFRelease(descs);
+                        }
                     }
                 }
+                ok
+            } else {
+                if current == SCOPE_NONE {
+                    return true;
+                }
+                let ok = unsafe { CTFontManagerUnregisterFontsForURL(u, current, &mut err) } != 0;
+                ok || error_code(err) == Some(NOT_REGISTERED)
             }
-            ok
-        } else {
-            if current == SCOPE_NONE {
-                return true;
+        }
+        #[cfg(target_os = "ios")]
+        {
+            if on {
+                let ok = unsafe { CTFontManagerRegisterFontsForURL(u, SCOPE_PERSISTENT, &mut err) } != 0;
+                ok || error_code(err) == Some(ALREADY_REGISTERED)
+            } else {
+                let ok = unsafe { CTFontManagerUnregisterFontsForURL(u, SCOPE_PERSISTENT, &mut err) } != 0;
+                ok || error_code(err) == Some(NOT_REGISTERED)
             }
-            let ok = unsafe { CTFontManagerUnregisterFontsForURL(u, current, &mut err) } != 0;
-            ok || error_code(err) == Some(NOT_REGISTERED)
         }
     }
 
     /// Whether a font file is still registered for good (persistent scope, from earlier versions).
     pub fn persistent(path: &Path) -> bool {
-        let Some(url) = CFURL::from_path(path, false) else { return false };
-        unsafe { CTFontManagerGetScopeForURL(url.as_concrete_TypeRef()) == SCOPE_PERSISTENT }
+        #[cfg(target_os = "macos")]
+        {
+            let Some(url) = CFURL::from_path(path, false) else { return false };
+            unsafe { CTFontManagerGetScopeForURL(url.as_concrete_TypeRef()) == SCOPE_PERSISTENT }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = path;
+            false
+        }
     }
 }
 
@@ -310,7 +340,7 @@ fn place_in(dir: &Path, path: &Path) -> bool {
 }
 
 /// Takes the font's file out of the font folder again.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(any(target_os = "macos", target_os = "ios"), allow(dead_code))]
 fn take_from(dir: &Path, path: &Path) -> bool {
     match slot(dir, path) {
         Some(t) if t.exists() || t.symlink_metadata().is_ok() => std::fs::remove_file(&t).is_ok(),

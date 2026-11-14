@@ -111,7 +111,7 @@ pub fn expand(picked: &[PathBuf]) -> Vec<PathBuf> {
 /// Exports fonts as RightFont does (-[RFFontService exportFonts:toLocation:], 0x10007e218): a
 /// folder named after the font (or family) is made in `dest` with its parents, and each file is
 /// copied into it; a file already there keeps its place. Returns how many were copied and where.
-#[cfg_attr(target_os = "android", allow(dead_code))]
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 pub fn export_fonts(dest: &Path, name: &str, files: &[PathBuf]) -> Result<(usize, PathBuf), String> {
     let dir = dest.join(safe_name(name));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -212,12 +212,12 @@ pub fn pick_fonts_or_folders() -> Vec<PathBuf> {
     out
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn pick_fonts_or_folders() -> Vec<PathBuf> {
     Vec::new()
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "android"), not(target_os = "ios")))]
 pub fn pick_fonts_or_folders() -> Vec<PathBuf> {
     let mut v = rfd::FileDialog::new().add_filter("Fonts", &["ttf", "otf", "ttc", "otc"]).pick_files().unwrap_or_default();
     if v.is_empty() {
@@ -265,8 +265,15 @@ pub fn pick_folder_or_library(start: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
+/// On mobile (Android, iOS) libraries are accessed via sandbox paths.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[allow(dead_code)]
+pub fn pick_folder_or_library(_start: Option<&Path>) -> Option<PathBuf> {
+    None
+}
+
 /// Elsewhere a FontCraft library is a folder, so the system's folder picker chooses it.
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "android"), not(target_os = "ios")))]
 pub fn pick_folder_or_library(start: Option<&Path>) -> Option<PathBuf> {
     let mut dlg = rfd::FileDialog::new();
     if let Some(dir) = start.filter(|d| d.is_dir()) {

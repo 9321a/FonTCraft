@@ -59,8 +59,8 @@ zip = { version = "9.5", default-features = false, features = ["deflate-flate2-z
 raw-window-handle = "0.6"
 miniz_oxide = "0.9"
 
-# Desktop only (Android has no menu bar icon, global shortcut or file dialogs of this kind).
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Desktop only (Android and iOS have no desktop menu bar icon, global shortcut or trash).
+[target.'cfg(all(not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 rfd = "0.18"
 trash = "5"
 tray-icon = "0.26"
@@ -97,3 +97,10 @@ objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSData", "NSString", "NSGeometry"] }
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSRunningApplication", "NSWindow", "NSPasteboard"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+winit = { version = "0.30", default-features = false }
+core-foundation = "0.10"
+objc2 = { version = "0.6", features = ["exception"] }
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSData", "NSString", "NSGeometry"] }

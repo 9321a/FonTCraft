@@ -204,7 +204,7 @@ impl App {
                             let field_w = (ui.available_width() - button_w - ui.spacing().item_spacing.x).max(80.0);
                             oslook::field(ui, egui::TextEdit::singleline(&mut nl.path).desired_width(field_w).hint_text("/Users/…/Fonts").margin(Margin::symmetric(8, 5)));
                             // The system's picker: a folder, or a FontCraft library (.fcl, a package on macOS).
-                            #[cfg(not(target_os = "android"))]
+                            #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
                             if ui.button(t(K::ChooseBtn)).clicked() {
                                 if let Some(p) = crate::fcl::pick_folder_or_library(exists.then_some(folder)) {
                                     nl.path = p.display().to_string();

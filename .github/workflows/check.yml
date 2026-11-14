@@ -57,3 +57,17 @@ jobs:
           export AR_aarch64_linux_android="$NDK/llvm-ar"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
           cargo check --target aarch64-linux-android
+
+  ipados:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ipados
+      - name: Compile for iPadOS
+        working-directory: ipados
+        run: cargo check --target aarch64-apple-ios

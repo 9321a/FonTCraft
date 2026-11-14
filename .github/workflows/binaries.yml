@@ -166,9 +166,30 @@ jobs:
           path: dist/*.apk
           retention-days: 30
 
+  ipados:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ipados
+      - name: Build iPadOS .ipa installer
+        run: sh compilar-ipados.sh
+      - uses: actions/upload-artifact@v6
+        with:
+          name: fontcraft-ipados
+          path: |
+            dist/*.ipa
+            dist/*.mobileconfig
+          retention-days: 30
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, windows, linux, android]
+    needs: [macos, windows, linux, android, ipados]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v6

@@ -27,19 +27,29 @@ fail() {
 
 CHOICE="$FONTCRAFT_ARCH"
 if [ -z "$CHOICE" ]; then
-  echo "¿Para qué Mac compilar FontCraft?"
+  echo "¿Para qué sistema o Mac compilar FontCraft?"
   echo "  1) Este Mac ($(uname -m))"
   echo "  2) Apple silicon (ARM64)"
   echo "  3) Intel (x64)"
   echo "  4) Universal (Intel + Apple silicon)"
-  printf "Elige 1-4 [1]: "
+  echo "  5) iPadOS (.ipa para iPad e iPhone ARM64)"
+  printf "Elige 1-5 [1]: "
   read -r n
   case "$n" in
     2) CHOICE=arm64 ;;
     3) CHOICE=x64 ;;
     4) CHOICE=universal ;;
+    5) CHOICE=ipados ;;
     *) CHOICE=native ;;
   esac
+fi
+
+if [ "$CHOICE" = ipados ]; then
+  sh compilar-ipados.sh || fail "La compilación para iPadOS falló."
+  echo ""
+  echo "Listo: dist/FontCraft.ipa en $(pwd)/dist"
+  [ -z "$FONTCRAFT_NO_OPEN" ] && open dist
+  exit 0
 fi
 
 echo "Compilando FontCraft ($CHOICE) con $(cargo --version)…"

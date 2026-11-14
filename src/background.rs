@@ -2,7 +2,7 @@
 
 use eframe::egui;
 use std::path::PathBuf;
-#[cfg_attr(target_os = "android", allow(unused_imports))]
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(unused_imports))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -120,7 +120,7 @@ pub fn read_hotkey(ctx: &egui::Context) -> Option<String> {
 }
 
 /// "Cmd+Shift+F" → the global shortcut library's own format.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn to_hotkey(s: &str) -> Option<global_hotkey::hotkey::HotKey> {
     let mut parts: Vec<String> = Vec::new();
     for p in s.split('+') {
@@ -138,7 +138,7 @@ fn to_hotkey(s: &str) -> Option<global_hotkey::hotkey::HotKey> {
 }
 
 /// Brings FontCraft back from the background (call on the main thread).
-#[cfg_attr(target_os = "android", allow(dead_code))]
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 pub fn show_app() {
     #[cfg(target_os = "macos")]
     if let Some(mtm) = objc2_foundation::MainThreadMarker::new() {
@@ -159,7 +159,7 @@ pub fn hide_app() {
 }
 
 /// A small asterisk (FontCraft's activation sign) as a black menu bar image.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn tray_image() -> tray_icon::Icon {
     let n = 36usize;
     let mut rgba = vec![0u8; n * n * 4];
@@ -187,19 +187,19 @@ fn tray_image() -> tray_icon::Icon {
     tray_icon::Icon::from_rgba(rgba, n as u32, n as u32).expect("menu bar image")
 }
 
-/// Android: no menu bar icon or global shortcut.
-#[cfg(target_os = "android")]
+/// Android and iOS: no desktop menu bar icon or global shortcut.
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Default)]
 pub struct Background {
     pub wake: Arc<AtomicBool>,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 impl Background {
     pub fn sync(&mut self, _ctx: &egui::Context, _keep_in_menu_bar: bool, _hotkey: &str) {}
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Default)]
 pub struct Background {
     tray: Option<tray_icon::TrayIcon>,
@@ -210,7 +210,7 @@ pub struct Background {
     pub wake: Arc<AtomicBool>,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Background {
     /// Keeps the menu bar icon and the shortcut in line with the settings.
     pub fn sync(&mut self, ctx: &egui::Context, keep_in_menu_bar: bool, hotkey: &str) {

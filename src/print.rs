@@ -579,9 +579,9 @@ struct PrintSettings {
 /// A laid-out catalog: its PDF and its pages.
 struct Done {
     path: PathBuf,
-    #[cfg_attr(any(target_os = "macos", target_os = "android"), allow(dead_code))]
+    #[cfg_attr(any(target_os = "macos", target_os = "android", target_os = "ios"), allow(dead_code))]
     pages: Vec<Page>,
-    #[cfg_attr(any(target_os = "macos", target_os = "android"), allow(dead_code))]
+    #[cfg_attr(any(target_os = "macos", target_os = "android", target_os = "ios"), allow(dead_code))]
     paper: Paper,
 }
 
@@ -601,7 +601,7 @@ fn print_pdf(done: Done) -> Result<(), String> {
             Err(_) => open_with_viewer(&done.path),
         }
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         open_with_viewer(&done.path)
     }
