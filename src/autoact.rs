@@ -220,6 +220,13 @@ const CATALOG: &[AppDef] = &[
     AppDef { name: "GridCraft", bundle: "ai.storyteller.gridcraft", ps_names: false, fonts: FontRead::AtStart, linux: &["gridcraft"], win: &["GridCraft.exe"], ..MAC },
     AppDef { name: "FilmCraft", bundle: "ai.storyteller.filmcraft", ps_names: false, fonts: FontRead::AtStart, linux: &["filmcraft"], win: &["FilmCraft.exe"], ..MAC },
     AppDef { name: "PotCraft", bundle: "ai.storyteller.potcraft", ps_names: false, fonts: FontRead::AtStart, linux: &["potcraft"], win: &["PotCraft.exe"], ..MAC },
+    AppDef { name: "AniCraft", bundle: "ai.storyteller.anicraft", ps_names: false, fonts: FontRead::AtStart, linux: &["anicraft"], win: &["AniCraft.exe"], ..MAC },
+    AppDef { name: "Canva", bundle: "com.canva.CanvaDesktop", linux: &["canva"], win: &["Canva.exe"], ..MAC },
+    AppDef { name: "Corel PHOTO-PAINT", bundle: "com.corel.photopaint", win: &["PhotoPnt.exe"], ..MAC },
+    AppDef { name: "Adobe Express", bundle: "com.adobe.express", win: &["Adobe Express.exe", "Express.exe"], ..MAC },
+    AppDef { name: "Microsoft Designer", bundle: "com.microsoft.designer", win: &["Designer.exe"], ..MAC },
+    AppDef { name: "Microsoft Visio", bundle: "win.microsoft.visio", win: &["VISIO.EXE"], ..MAC },
+    AppDef { name: "Boxy SVG", bundle: "com.boxy-svg.boxy-svg-mac", linux: &["boxy-svg"], win: &["Boxy SVG.exe", "boxy-svg.exe"], ..MAC },
     AppDef { name: "Inkscape", bundle: "org.inkscape.Inkscape", ps_names: false, how: How::Activate, linux: &["org.inkscape.Inkscape", "inkscape"], win: &["inkscape.exe"], ..MAC },
     AppDef { name: "Scribus", bundle: "net.scribus", ps_names: false, how: How::Activate, linux: &["scribus", "net.scribus.Scribus"], win: &["Scribus.exe"], ..MAC },
     AppDef { name: "Krita", bundle: "org.krita", ps_names: false, how: How::Activate, linux: &["org.kde.krita", "krita"], win: &["krita.exe"], ..MAC },
@@ -526,11 +533,24 @@ fn read_icns(path: &Path) -> Option<ColorImage> {
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn app_icon(app: &Path) -> Option<ColorImage> {
-    let plist = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
-    let dict = plist.as_dictionary()?;
-    let name = dict.get("CFBundleIconFile").or_else(|| dict.get("CFBundleIconName"))?.as_string()?;
-    let file = if name.ends_with(".icns") { name.to_string() } else { format!("{name}.icns") };
-    read_icns(&app.join("Contents/Resources").join(file))
+    let res = app.join("Contents/Resources");
+    if let Ok(plist) = plist::Value::from_file(app.join("Contents/Info.plist")) {
+        if let Some(dict) = plist.as_dictionary() {
+            if let Some(name) = dict.get("CFBundleIconFile").or_else(|| dict.get("CFBundleIconName")).and_then(|v| v.as_string()) {
+                let file = if name.ends_with(".icns") { name.to_string() } else { format!("{name}.icns") };
+                if let Some(img) = read_icns(&res.join(&file)) {
+                    return Some(img);
+                }
+            }
+        }
+    }
+    // Fallback: check standard icon names in Resources
+    for cand in ["AppIcon.icns", "app.icns", "icon.icns"] {
+        if let Some(img) = read_icns(&res.join(cand)) {
+            return Some(img);
+        }
+    }
+    None
 }
 
 /// An app's version from its Info.plist (CFBundleShortVersionString, the key RightFont reads,
@@ -542,62 +562,33 @@ fn bundle_version(app: &Path) -> Option<String> {
     (!v.is_empty()).then_some(v)
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-/// Document kinds whose apps choose fonts (word processors, spreadsheets, presentations, layout,
-/// drawing and photo editors): file extensions…
-const FONT_DOC_EXT: &[&str] = &[
-    "docx", "doc", "dotx", "rtf", "rtfd", "odt", "ott", "fodt", "pages", "wpd", "xlsx", "xls", "ods", "fods", "numbers", "pptx", "ppt",
-    "odp", "fodp", "key", "odg", "svg", "ai", "eps", "psd", "psb", "indd", "idml", "qxp", "sketch", "fig", "afdesign", "afphoto", "afpub",
-    "af", "xd", "cdr", "pub", "vsdx", "kra", "xcf", "sla", "pxd", "pxm", "graffle", "mindnode", "fcpbundle",
-];
-/// …and content types / MIME types.
-const FONT_DOC_TYPES: &[&str] = &[
-    "org.openxmlformats.", "com.microsoft.word", "com.microsoft.excel", "com.microsoft.powerpoint", "public.rtf", "com.apple.iwork.",
-    "org.oasis-open.opendocument.", "public.svg-image", "com.adobe.photoshop", "com.adobe.illustrator", "com.adobe.indesign",
-    "application/vnd.oasis.opendocument.", "application/vnd.openxmlformats-officedocument.", "application/msword", "application/rtf",
-    "application/vnd.ms-excel", "application/vnd.ms-powerpoint", "image/svg+xml", "image/x-xcf", "application/x-krita", "application/vnd.scribus",
-];
-/// Linux desktop-entry categories of apps that set text in fonts.
-#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
-const FONT_APP_CATEGORIES: &[&str] = &["WordProcessor", "Spreadsheet", "Presentation", "VectorGraphics", "RasterGraphics", "Publishing", "2DGraphics", "TextEditor"];
-
-/// Whether an app's declared document kinds show that it sets text in fonts.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn edits_font_documents(kinds: &[String]) -> bool {
-    kinds.iter().any(|k| {
-        let k = k.to_ascii_lowercase();
-        FONT_DOC_EXT.iter().any(|e| k == *e) || FONT_DOC_TYPES.iter().any(|t| k.starts_with(&t.to_ascii_lowercase()))
-    })
-}
-
-/// The document kinds a macOS app declares it opens (extensions and content types).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn mac_doc_kinds(app: &Path) -> Vec<String> {
-    let Ok(plist) = plist::Value::from_file(app.join("Contents/Info.plist")) else { return Vec::new() };
-    let mut out = Vec::new();
-    let Some(types) = plist.as_dictionary().and_then(|d| d.get("CFBundleDocumentTypes")).and_then(|t| t.as_array()) else { return out };
-    for t in types {
-        let Some(d) = t.as_dictionary() else { continue };
-        // Only kinds the app edits (not ones it merely views).
-        if d.get("CFBundleTypeRole").and_then(|r| r.as_string()) == Some("Viewer") {
-            continue;
-        }
-        for key in ["CFBundleTypeExtensions", "LSItemContentTypes"] {
-            if let Some(list) = d.get(key).and_then(|l| l.as_array()) {
-                out.extend(list.iter().filter_map(|v| v.as_string()).map(String::from));
-            }
-        }
-    }
-    out
-}
-
-/// An app found because it sets text in fonts, though it isn't in FontCraft's list: it gets the
-/// copy → swap font → paste way, PostScript names on macOS and family names elsewhere.
-#[cfg_attr(target_os = "windows", allow(dead_code))]
-fn generic_def(name: &str, key: &str) -> &'static AppDef {
-    let name: &'static str = Box::leak(name.to_string().into_boxed_str());
-    let bundle: &'static str = Box::leak(key.to_string().into_boxed_str());
-    Box::leak(Box::new(AppDef { name, bundle, ps_names: cfg!(target_os = "macos"), ..MAC }))
+/// Whether an app is strictly excluded (email clients like Outlook, browsers, viewers, dev tools).
+fn is_excluded(bundle: &str, name: &str) -> bool {
+    let b = bundle.to_ascii_lowercase();
+    let n = name.to_ascii_lowercase();
+    // Email & communication (e.g. Microsoft Outlook, Thunderbird, Apple Mail)
+    b.contains("outlook") || n.contains("outlook")
+    || b.contains("thunderbird") || n.contains("thunderbird")
+    || b.contains("mail") || n.contains("mail")
+    // Web browsers
+    || b.contains("chrome") || n.contains("chrome")
+    || b.contains("safari") || n.contains("safari")
+    || b.contains("firefox") || n.contains("firefox")
+    || b.contains("msedge") || n.contains("msedge") || b.contains("edge") || n.contains("edge")
+    || b.contains("brave") || n.contains("brave")
+    || b.contains("opera") || n.contains("opera")
+    || b.contains("arc") || n.contains("arc")
+    || b.contains("vivaldi") || n.contains("vivaldi")
+    || b.contains("browser") || n.contains("browser")
+    // Viewers & non-typographic readers (Preview, Acrobat Reader)
+    || b.contains("preview") || n.contains("preview")
+    || b.contains("reader") || n.contains("reader")
+    || (b.contains("acrobat") && !b.contains("distiller"))
+    // Dev tools & code editors
+    || b.contains("vscode") || b.contains("visualstudio") || n.contains("code") || n.contains("visual studio")
+    || b.contains("sublime") || n.contains("sublime")
+    || b.contains("xcode") || n.contains("xcode")
+    || b.contains("terminal") || n.contains("terminal") || b.contains("iterm") || n.contains("iterm")
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -668,14 +659,17 @@ pub fn find_installed() -> Vec<InstalledApp> {
         if let Ok(home) = std::env::var("HOME") {
             dirs.push(PathBuf::from(home).join("Applications"));
         }
-        let mut candidates: Vec<(PathBuf, String)> = Vec::new();
+        let mut candidates: Vec<(PathBuf, String, String)> = Vec::new();
         for d in &dirs {
             let Ok(rd) = std::fs::read_dir(d) else { continue };
             for e in rd.flatten() {
                 let p = e.path();
                 let mut add = |p: PathBuf| {
                     if let Some(id) = bundle_id(&p) {
-                        candidates.push((p, id));
+                        let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                        if !is_excluded(&id, &stem) {
+                            candidates.push((p, id, stem));
+                        }
                     }
                 };
                 if p.extension().is_some_and(|x| x == "app") {
@@ -693,20 +687,9 @@ pub fn find_installed() -> Vec<InstalledApp> {
             if def.bundle.is_empty() || found.iter().any(|f| f.def.bundle == def.bundle) {
                 continue;
             }
-            if let Some((path, _)) = candidates.iter().find(|(_, id)| id == def.bundle) {
+            if let Some((path, _, _)) = candidates.iter().find(|(_, id, stem)| id == def.bundle || def.name.eq_ignore_ascii_case(stem)) {
                 let procs = vec![format!("{}/Contents/MacOS/", path.display())];
                 found.push(InstalledApp { def, icon: app_icon(path), path: path.clone(), procs, version: bundle_version(path), tex: None });
-            }
-        }
-        // Every other app that edits documents set in fonts (text, sheets, slides, layout, drawing).
-        for (path, id) in &candidates {
-            if found.iter().any(|f| &f.path == path || f.def.bundle == id) || id.starts_with("com.apple.") && !id.starts_with("com.apple.iWork") {
-                continue;
-            }
-            if edits_font_documents(&mac_doc_kinds(path)) {
-                let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| id.clone());
-                let procs = vec![format!("{}/Contents/MacOS/", path.display())];
-                found.push(InstalledApp { def: generic_def(&name, id), icon: app_icon(path), path: path.clone(), procs, version: bundle_version(path), tex: None });
             }
         }
     }
@@ -722,9 +705,6 @@ pub fn find_installed() -> Vec<InstalledApp> {
             format!("{home}/.local/share/flatpak/exports/share/applications"),
         ];
         let mut entries: Vec<(PathBuf, String, String, String)> = Vec::new(); // (file, stem, exec, icon)
-        // Every desktop entry that edits documents set in fonts, for the generic list below:
-        // (index into entries, name, document kinds and categories).
-        let mut font_apps: Vec<(usize, String)> = Vec::new();
         for d in &dirs {
             let Ok(rd) = std::fs::read_dir(d) else { continue };
             for e in rd.flatten() {
@@ -734,13 +714,14 @@ pub fn find_installed() -> Vec<InstalledApp> {
                 }
                 let text = std::fs::read_to_string(&p).unwrap_or_default();
                 let field = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)).unwrap_or("").trim().to_string();
+                let hidden = field("NoDisplay=") == "true";
+                if hidden {
+                    continue;
+                }
                 let exec = field("Exec=").split_whitespace().next().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
                 let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-                let mimes: Vec<String> = field("MimeType=").split(';').filter(|s| !s.is_empty()).map(String::from).collect();
-                let cats = field("Categories=");
-                let hidden = field("NoDisplay=") == "true";
-                if !hidden && (edits_font_documents(&mimes) || cats.split(';').any(|c| FONT_APP_CATEGORIES.contains(&c))) {
-                    font_apps.push((entries.len(), field("Name=")));
+                if is_excluded(&stem, &exec) {
+                    continue;
                 }
                 entries.push((p, stem, exec, field("Icon=")));
             }
@@ -749,19 +730,10 @@ pub fn find_installed() -> Vec<InstalledApp> {
             if found.iter().any(|f| f.def.name == def.name) {
                 continue;
             }
-            if let Some((path, _, exec, icon)) = entries.iter().find(|(_, stem, exec, _)| def.linux.iter().any(|n| n == stem || n == exec)) {
+            if let Some((path, _, exec, icon)) = entries.iter().find(|(_, stem, exec, _)| def.linux.iter().any(|n| n == stem || n == exec) || def.name.eq_ignore_ascii_case(stem)) {
                 let procs = def.linux.iter().map(|n| n.to_string()).chain(std::iter::once(exec.clone())).collect();
                 found.push(InstalledApp { def, icon: linux_icon(icon), path: path.clone(), procs, version: None, tex: None });
             }
-        }
-        // Every other installed app that sets text in fonts.
-        for (i, name) in font_apps {
-            let (path, stem, exec, icon) = &entries[i];
-            if name.is_empty() || exec.is_empty() || found.iter().any(|f| &f.path == path || f.procs.iter().any(|p| p == exec || p == stem)) {
-                continue;
-            }
-            let key = format!("linux.{stem}");
-            found.push(InstalledApp { def: generic_def(&name, &key), icon: linux_icon(icon), path: path.clone(), procs: vec![exec.clone(), stem.clone()], version: None, tex: None });
         }
     }
     #[cfg(target_os = "windows")]
@@ -770,28 +742,50 @@ pub fn find_installed() -> Vec<InstalledApp> {
         if let Ok(l) = std::env::var("LOCALAPPDATA") {
             roots.push(PathBuf::from(l).join("Programs"));
         }
-        let mut exes: Vec<PathBuf> = Vec::new();
-        fn walk_exe(d: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-            let Ok(rd) = std::fs::read_dir(d) else { return };
-            for e in rd.flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    if depth < 4 {
-                        walk_exe(&p, depth + 1, out);
+        let vendor_subdirs = [
+            "", "Adobe", "Microsoft Office", "Microsoft Office/root/Office16", "Microsoft Office/Office16",
+            "Affinity", "Canva", "Corel", "Figma", "Inkscape", "Inkscape/bin", "GIMP 2", "GIMP 2/bin",
+            "GIMP 3", "GIMP 3/bin", "Krita (x64)", "Krita (x64)/bin", "Scribus", "Boxy SVG",
+            "LibreOffice", "LibreOffice/program", "ONLYOFFICE", "ONLYOFFICE/DesktopEditors",
+            "Storyteller", "ArtCraft", "Icons8/Lunacy",
+        ];
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        for r in &roots {
+            for sub in &vendor_subdirs {
+                let dir = if sub.is_empty() { r.clone() } else { r.join(sub) };
+                if let Ok(rd) = std::fs::read_dir(&dir) {
+                    for e in rd.flatten() {
+                        let p = e.path();
+                        if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe")) {
+                            candidates.push(p);
+                        } else if p.is_dir() {
+                            if let Ok(sub_rd) = std::fs::read_dir(&p) {
+                                for se in sub_rd.flatten() {
+                                    let sp = se.path();
+                                    if sp.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe")) {
+                                        candidates.push(sp);
+                                    } else if sp.is_dir() && sp.file_name().is_some_and(|n| n == "bin" || n == "program" || n == "Support Files") {
+                                        if let Ok(bin_rd) = std::fs::read_dir(&sp) {
+                                            for be in bin_rd.flatten() {
+                                                let bp = be.path();
+                                                if bp.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe")) {
+                                                    candidates.push(bp);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe")) {
-                    out.push(p);
                 }
             }
-        }
-        for r in &roots {
-            walk_exe(r, 0, &mut exes);
         }
         for def in CATALOG.iter().filter(|d| !d.win.is_empty()) {
             if found.iter().any(|f| f.def.name == def.name) {
                 continue;
             }
-            let hit = exes.iter().find(|p| p.file_name().is_some_and(|n| def.win.iter().any(|w| n.to_string_lossy().eq_ignore_ascii_case(w))));
+            let hit = candidates.iter().find(|p| p.file_name().is_some_and(|n| def.win.iter().any(|w| n.to_string_lossy().eq_ignore_ascii_case(w))));
             if let Some(path) = hit {
                 let procs = def.win.iter().map(|w| w.to_lowercase()).collect();
                 found.push(InstalledApp { def, icon: None, path: path.clone(), procs, version: None, tex: None });
@@ -822,23 +816,28 @@ fn linux_icon(name: &str) -> Option<ColorImage> {
     Some(ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw()))
 }
 
-/// Which of the apps are open now, by their process names.
+/// Which of the apps are open now, by their process names or bundle identifiers.
 fn running_now(apps: &[(String, Vec<String>)]) -> HashSet<String> {
     let mut running = HashSet::new();
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        for (key, _) in apps {
+            if app_running(key) {
+                running.insert(key.clone());
+            }
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     let list = crate::paths::command("ps").args(["-axo", "comm="]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
     #[cfg(target_os = "windows")]
     let list = crate::paths::command("tasklist").args(["/fo", "csv", "/nh"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase()).unwrap_or_default();
+    #[cfg(not(target_os = "macos"))]
     for (key, procs) in apps {
         let hit = list.lines().any(|l| {
             let l = l.trim().trim_matches('"');
             procs.iter().any(|p| {
-                if cfg!(target_os = "macos") {
-                    l.starts_with(p.as_str())
-                } else {
-                    let first = l.split("\",\"").next().unwrap_or(l);
-                    first.rsplit('/').next() == Some(p.as_str()) || first == p.as_str()
-                }
+                let first = l.split("\",\"").next().unwrap_or(l);
+                first.rsplit('/').next() == Some(p.as_str()) || first == p.as_str()
             })
         });
         if hit {
@@ -911,8 +910,25 @@ fn wait_front(bundle: &str) {
     std::thread::sleep(Duration::from_millis(150));
 }
 
-/// The app in front right now (its bundle id), from macOS's own `lsappinfo`.
+/// The app in front right now (its bundle id), asked directly from Cocoa or lsappinfo.
 fn front_bundle() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        let run = || unsafe {
+            let ws: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+            if ws.is_null() { return None; }
+            let front_app: Option<Retained<AnyObject>> = msg_send![ws, frontmostApplication];
+            let Some(front_app) = front_app else { return None };
+            let bid: Option<Retained<objc2_foundation::NSString>> = msg_send![&*front_app, bundleIdentifier];
+            bid.map(|s| s.to_string())
+        };
+        if let Ok(Some(bundle)) = objc2::exception::catch(std::panic::AssertUnwindSafe(run)) {
+            return Some(bundle);
+        }
+    }
     let asn = String::from_utf8_lossy(&crate::paths::command("lsappinfo").arg("front").output().ok()?.stdout).trim().to_string();
     let info = String::from_utf8_lossy(&crate::paths::command("lsappinfo").args(["info", "-only", "bundleid", &asn]).output().ok()?.stdout).to_string();
     info.split('"').nth(3).map(String::from)
@@ -1077,9 +1093,9 @@ fn rtf_escape(text: &str) -> String {
     out
 }
 
-/// Rich text of `text` set in `font`.
+/// Rich text of `text` set in `font` without unwanted leading or trailing spaces.
 pub fn rtf_for(text: &str, font: &str) -> String {
-    format!("{{\\rtf1\\ansi\\ansicpg1252{{\\fonttbl{{\\f0\\fnil\\fcharset0 {font};}}}}\\f0 {}}}", rtf_escape(text))
+    format!("{{\\rtf1\\ansi\\ansicpg1252{{\\fonttbl{{\\f0\\fnil\\fcharset0 {font};}}}}\\uc0\\f0{{{}}}}}", rtf_escape(text))
 }
 
 /// Copied rich text with every font in its font table replaced by `font` (sizes, colours and the
@@ -1150,7 +1166,10 @@ fn apply_in_app(bundle: &str, kind: Option<Docs>, font: &str, script: Option<&st
     if let Some(s) = script {
         let s = s.replace("{bundle}", bundle).replace("{font}", font);
         route(1);
-        return if osascript(&s).is_some() { Ok(doc) } else { Err(false) };
+        if osascript(&s).is_some() {
+            return Ok(doc);
+        }
+        // If AppleScript fails (e.g. text box container selected or script mismatch), fall through to Route 4!
     }
     // VectorCraft: its own "Highlight Font Name" (Cmd+Alt+Shift+F, command type.highlightFontName)
     // opens the Character panel's font family menu with the search field focused; the family is
@@ -1434,7 +1453,12 @@ fn settle_after_insert(before: Option<Caret>, n: usize, set_font: bool) {
     let extra = a.total - (b.total + n);
     let blank = |t: Option<String>| t.is_some_and(|t| !t.is_empty() && t.chars().all(char::is_whitespace));
     if extra > 0 {
-        if blank(ax_text(glyph_end, extra)) {
+        if extra >= 2 && blank(ax_text(b.start, 1)) && blank(ax_text(a.start - 1, 1)) {
+            key(51);
+            (0..n).for_each(|_| key(123));
+            key(51);
+            (0..n).for_each(|_| key(124));
+        } else if blank(ax_text(glyph_end, extra)) {
             // Added after the glyph: the cursor is past them (backspace) or before them (forward).
             if a.start == glyph_end + extra {
                 (0..extra).for_each(|_| key(51));
@@ -2061,6 +2085,87 @@ pub fn paint_app_icon(ui: &mut egui::Ui, tex: Option<&TextureHandle>, name: &str
     r
 }
 
+fn app_badge_style(name: &str, accent: Color32) -> (Color32, &'static str, Color32) {
+    let n = name.to_ascii_lowercase();
+    if n.contains("photoshop") {
+        (Color32::from_rgb(0, 30, 54), "Ps", Color32::from_rgb(49, 168, 255))
+    } else if n.contains("illustrator") {
+        (Color32::from_rgb(51, 0, 0), "Ai", Color32::from_rgb(255, 154, 0))
+    } else if n.contains("indesign") {
+        (Color32::from_rgb(73, 2, 31), "Id", Color32::from_rgb(255, 51, 102))
+    } else if n.contains("incopy") {
+        (Color32::from_rgb(50, 10, 40), "Ic", Color32::from_rgb(255, 100, 150))
+    } else if n.contains("after effects") {
+        (Color32::from_rgb(0, 0, 90), "Ae", Color32::from_rgb(153, 153, 255))
+    } else if n.contains("xd") {
+        (Color32::from_rgb(71, 1, 55), "Xd", Color32::from_rgb(255, 97, 246))
+    } else if n.contains("express") {
+        (Color32::from_rgb(38, 0, 38), "Ex", Color32::from_rgb(204, 41, 250))
+    } else if n.contains("word") {
+        (Color32::from_rgb(24, 90, 189), "W", Color32::WHITE)
+    } else if n.contains("powerpoint") {
+        (Color32::from_rgb(196, 62, 28), "P", Color32::WHITE)
+    } else if n.contains("excel") {
+        (Color32::from_rgb(16, 124, 65), "X", Color32::WHITE)
+    } else if n.contains("publisher") && !n.contains("affinity") {
+        (Color32::from_rgb(7, 117, 104), "Pub", Color32::WHITE)
+    } else if n.contains("designer") && n.contains("microsoft") {
+        (Color32::from_rgb(80, 55, 149), "Des", Color32::WHITE)
+    } else if n.contains("visio") {
+        (Color32::from_rgb(57, 85, 163), "V", Color32::WHITE)
+    } else if n.contains("coreldraw") {
+        (Color32::from_rgb(0, 132, 61), "CD", Color32::WHITE)
+    } else if n.contains("photo-paint") || n.contains("photopaint") {
+        (Color32::from_rgb(183, 18, 52), "PP", Color32::WHITE)
+    } else if n.contains("figma") {
+        (Color32::from_rgb(10, 207, 131), "Fg", Color32::WHITE)
+    } else if n.contains("canva") {
+        (Color32::from_rgb(0, 196, 204), "Cv", Color32::WHITE)
+    } else if n.contains("sketch") {
+        (Color32::from_rgb(253, 179, 0), "Sk", Color32::BLACK)
+    } else if n.contains("affinity designer") {
+        (Color32::from_rgb(27, 114, 186), "Ad", Color32::WHITE)
+    } else if n.contains("affinity photo") {
+        (Color32::from_rgb(127, 63, 152), "Ap", Color32::WHITE)
+    } else if n.contains("affinity publisher") {
+        (Color32::from_rgb(212, 32, 54), "Pub", Color32::WHITE)
+    } else if n.contains("affinity") {
+        (Color32::from_rgb(33, 150, 243), "Aff", Color32::WHITE)
+    } else if n.contains("vectorcraft") {
+        (Color32::from_rgb(108, 92, 231), "VC", Color32::WHITE)
+    } else if n.contains("designcraft") {
+        (Color32::from_rgb(9, 132, 227), "DC", Color32::WHITE)
+    } else if n.contains("photocraft") {
+        (Color32::from_rgb(0, 184, 148), "PC", Color32::WHITE)
+    } else if n.contains("anicraft") {
+        (Color32::from_rgb(232, 67, 147), "AC", Color32::WHITE)
+    } else if n.contains("gimp") {
+        (Color32::from_rgb(114, 92, 71), "Gi", Color32::WHITE)
+    } else if n.contains("inkscape") {
+        (Color32::from_rgb(30, 30, 30), "Ink", Color32::WHITE)
+    } else if n.contains("krita") {
+        (Color32::from_rgb(51, 117, 255), "Kr", Color32::WHITE)
+    } else if n.contains("scribus") {
+        (Color32::from_rgb(31, 107, 153), "Sc", Color32::WHITE)
+    } else if n.contains("boxy") {
+        (Color32::from_rgb(16, 163, 127), "Bx", Color32::WHITE)
+    } else if n.contains("libreoffice") {
+        (Color32::from_rgb(24, 163, 3), "LO", Color32::WHITE)
+    } else if n.contains("onlyoffice") {
+        (Color32::from_rgb(255, 111, 61), "OO", Color32::WHITE)
+    } else if n.contains("pages") {
+        (Color32::from_rgb(255, 149, 0), "Pg", Color32::WHITE)
+    } else if n.contains("keynote") {
+        (Color32::from_rgb(0, 122, 255), "Kn", Color32::WHITE)
+    } else if n.contains("numbers") {
+        (Color32::from_rgb(52, 199, 89), "Nm", Color32::WHITE)
+    } else if n.contains("pixelmator") {
+        (Color32::from_rgb(255, 59, 48), "Px", Color32::WHITE)
+    } else {
+        (accent, "App", Color32::WHITE)
+    }
+}
+
 fn draw_app_icon(p: &egui::Painter, r: Rect, tex: Option<&TextureHandle>, name: &str, accent: Color32) {
     match tex {
         Some(t) => {
@@ -2070,9 +2175,11 @@ fn draw_app_icon(p: &egui::Painter, r: Rect, tex: Option<&TextureHandle>, name: 
             p.image(t.id(), fit, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
         }
         None => {
-            p.circle_filled(r.center(), r.width() * 0.45, accent);
-            let initial: String = name.chars().take(1).collect();
-            p.text(r.center(), Align2::CENTER_CENTER, initial, egui::FontId::proportional(r.width() * 0.5), Color32::WHITE);
+            let (bg, label, text_color) = app_badge_style(name, accent);
+            let tile = r.shrink(1.0);
+            p.rect_filled(tile, 4.0, bg);
+            p.rect_stroke(tile, 4.0, Stroke::new(1.0, Color32::from_black_alpha(40)), egui::StrokeKind::Inside);
+            p.text(tile.center(), Align2::CENTER_CENTER, label, egui::FontId::proportional(tile.width() * 0.42), text_color);
         }
     }
 }

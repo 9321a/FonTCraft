@@ -1755,10 +1755,18 @@ impl App {
                         self.toggle_expanded(family);
                     } else {
                         self.selected = Some(*row);
+                        if let Some(app) = self.target_app() {
+                            self.apply_to_app(app, face);
+                        }
                     }
                 }
-                if resp.double_clicked() && matches!(row, Row::Family(_)) && n_faces > 1 {
-                    self.toggle_expanded(family);
+                if resp.double_clicked() {
+                    if matches!(row, Row::Family(_)) && n_faces > 1 {
+                        self.toggle_expanded(family);
+                    }
+                    if let Some(app) = self.target_app() {
+                        self.apply_to_app(app, face);
+                    }
                 }
                 // Right-click: the font menu, as the system's own menu where it offers one.
                 let row = *row;

@@ -381,11 +381,10 @@ mod win {
     }
     #[link(name = "user32")]
     extern "system" {
-        fn SendMessageTimeoutW(hwnd: isize, msg: u32, w: usize, l: isize, flags: u32, timeout: u32, result: *mut usize) -> isize;
+        fn SendNotifyMessageW(hwnd: isize, msg: u32, w: usize, l: isize) -> i32;
     }
     const HWND_BROADCAST: isize = 0xffff;
     const WM_FONTCHANGE: u32 = 0x001d;
-    const SMTO_ABORTIFHUNG: u32 = 0x0002;
 
     /// Windows: the font is added for this session (every app), then apps are told fonts changed.
     /// Its file also goes into the user's font folder (%LOCALAPPDATA%\\Microsoft\\Windows\\Fonts\\
@@ -408,9 +407,8 @@ mod win {
                 RemoveFontResourceExW(wide.as_ptr(), 0, std::ptr::null_mut()) != 0
             }
         };
-        let mut r = 0usize;
         unsafe {
-            SendMessageTimeoutW(HWND_BROADCAST, WM_FONTCHANGE, 0, 0, SMTO_ABORTIFHUNG, 1000, &mut r);
+            SendNotifyMessageW(HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
         }
         ok
     }
