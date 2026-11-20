@@ -351,6 +351,7 @@ impl App {
         let cell = glyph_px * 1.6;
         let cols = ((w - 4.0) / cell).floor().max(1.0) as usize;
         let rows = shown.len().div_ceil(cols);
+        let mut native_glyph = None;
         egui::ScrollArea::vertical().id_salt(("glyph-grid", face)).auto_shrink(false).show_rows(ui, cell, rows, |ui, range| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             for r in range {
@@ -393,20 +394,66 @@ impl App {
                             self.glyph_sel = Some(gid);
                             self.autoact.dragging = Some((gid, face));
                         }
-                        // Pointer resting on a glyph: a 144-point preview with the font's lines.
-                        let resp = resp.on_hover_ui(|ui| {
-                            let (r, _) = ui.allocate_exact_size(Vec2::new(300.0, 300.0), Sense::hover());
-                            self.paint_glyph_metrics(ui, r, face, gid, crate::metrics::PREVIEW_PT, false);
-                        });
+                        // Pointer on a glyph: a 144-point preview with the font's lines, at once (not
+                        // after the half-second wait of ordinary tooltips); not while the glyph is
+                        // dragged, nor in the frame a right-click menu opens or while it is open: the
+                        // preview and egui's own menu are the same pop-up of the glyph, and showing
+                        // both in one frame stopped FontCraft (egui: "changed layer_id during the
+                        // frame", Tooltip → Foreground).
+                        let menu_now = resp.secondary_clicked() || resp.context_menu_opened() || ui.ctx().input(|i| i.pointer.secondary_down());
+                        if resp.hovered() && !resp.dragged() && !menu_now {
+                            self.glyph_preview(&ctx, face, gid);
+                        }
                         // Right-click: character info, copy, mark fonts, similar shapes.
-                        resp.context_menu(|ui| {
-                            self.glyph_sel = Some(gid);
-                            self.glyph_menu(ui, face, gid);
-                        });
+                        if crate::nativemenu::available() {
+                            if resp.secondary_clicked() {
+                                self.glyph_sel = Some(gid);
+                                native_glyph = Some((face, gid));
+                            }
+                        } else {
+                            resp.context_menu(|ui| {
+                                self.glyph_sel = Some(gid);
+                                self.glyph_menu(ui, face, gid);
+                            });
+                        }
                     }
                 });
             }
         });
+        if let Some((face, gid)) = native_glyph {
+            let (items, acts) = self.glyph_menu_native(face, gid);
+            self.open_native_menu(items, acts);
+        }
+    }
+
+    /// The pointer's glyph at 144 pt with the font's lines, beside the details panel: its right
+    /// edge against the panel's left edge, centred on the panel's height (the person's request),
+    /// above everything, at once. Its own layer (not egui's tooltip, which a right-click menu on
+    /// the same glyph shares).
+    fn glyph_preview(&mut self, ctx: &egui::Context, face: usize, gid: u16) {
+        let side = crate::metrics::PREVIEW_SIDE;
+        let pad = crate::metrics::PREVIEW_PAD;
+        let outer = side + 2.0 * pad;
+        let card = self.details_card.unwrap_or_else(|| ctx.content_rect());
+        let top = (card.center().y - outer / 2.0).max(ctx.content_rect().top());
+        let pos = egui::Pos2::new(card.left() - outer, top);
+        let pal = self.pal;
+        egui::Area::new(egui::Id::unique("glyph-hover-preview"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(pal.card)
+                    .stroke(egui::Stroke::new(1.0_f32, pal.line))
+                    .corner_radius(10)
+                    .inner_margin(egui::Margin::same(pad as i8))
+                    .shadow(ui.style().visuals.popup_shadow)
+                    .show(ui, |ui| {
+                        let (r, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
+                        self.paint_glyph_metrics(ui, r, face, gid, crate::metrics::PREVIEW_PT, false);
+                    });
+            });
     }
 
     /// The examples of one feature: "these glyphs → those glyphs".

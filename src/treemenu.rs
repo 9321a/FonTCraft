@@ -66,8 +66,8 @@ pub fn tree(ui: &mut egui::Ui, pal: &Pal, libraries: &[Library], order: &[usize]
             {
                 let s = &l.sets[si];
                 let indent = 14.0 + (s.depth.min(8) as f32) * 12.0;
-                let sub = if kind == LibKind::Folder { Some(s.rel.clone()) } else { None };
-                let on = sub.is_some() && chosen.is_some_and(|c| c.0 == i && c.1 == sub);
+                let sub = Some(s.rel.clone());
+                let on = chosen.is_some_and(|c| c.0 == i && c.1 == sub);
                 let sub_icon: &dyn Fn(&egui::Painter, egui::Pos2, egui::Color32) = if kind == LibKind::Fcl {
                     &paint_family
                 } else {

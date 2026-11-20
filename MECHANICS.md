@@ -631,3 +631,135 @@ zip 9.5; Rust 1.99.1.
 | Linux (X11): `xdotool search --onlyvisible --class <app> windowactivate --sync`, then `xdotool type`; Wayland can't type into other apps, so the glyph stays on the clipboard. The .deb recommends xdotool | `winauto::insert` |
 | GPU limits | the graphics device asks for the adapter's own limits (2D textures up to 8192): small ARM GPUs refused the default request (`max_texture_dimension_3d` 2048 > 512) | `main.rs`, `WgpuSetupCreateNew::device_descriptor` |
 | macOS activation | the original file is registered with CoreText at once (RightFont 0x10004b974; what Affinity and the Apple apps used), and a hard link is left in `~/Library/Fonts/FontCraft` for the apps that only read the font folders (VectorCraft) | `activate::mac::set` |
+
+## This round: Affinity, Finder sidebar, app icon tile, top bar order
+
+| Rule | Value / formula | In FontCraft | Where |
+|---|---|---|---|
+| Answering another app's font request | the request block reads `NSFontNameAttribute` only when `CFGetTypeID(value) == CFStringGetTypeID()`, hands the name on and returns **nothing** (`mov x0, #0x0` at 0x10004f318); the font is turned on afterwards on the main thread | `fontreq::mac::answer` returns NULL and turns the font on in a worker thread. Before, FontCraft returned font *descriptors*: macOS treats the answer as file URLs (`XTIssueSandboxExtensionsForURLs` → `CFURLCopyResourcePropertyForKey`) and crashed FontCraft (`doesNotRecognizeSelector`, crash reports of 15 Nov 2026 20:37, 20:43, 20:55) whenever Affinity opened a document with fonts that weren't on | RightFont block **0x10004f10c**, `-[RFFontActivator handleRequestFonts]` **0x10004f89c** |
+| Affinity sees new fonts | Affinity 3.3.3 lists fonts with `CTFontManagerCopyAvailablePostScriptNames` (liblibkernel) and refreshes on `NSFontSetChangedNotification` (`fontSetChanged:`, libcocoaui), which session-scope registration triggers | nothing extra needed once the request no longer crashes | Affinity's own libraries (imports) |
+| Sidebar (Finder, macOS 26) | floating card inset 8 pt, radius 14, soft shadow; titles in sentence case, 11 pt semibold grey, chevron only on hover at the right; rows 28 pt, SF Symbols in the accent colour, name in the label colour, grey rounded selection (radius 8) | `finder.rs` (estimated from Finder's look) | — |
+| App icon tile | superellipse `|x|^5 + |y|^5 = 1`, 824/1024 of the icon, shadow 12/1024 down, art 66 % of the tile | `appicon::apple_squircle`, `render_tile` (the old curve cut the top corners) | Apple icon template |
+| Top bar | search (SF Symbol magnifying glass) \| "Frase" + phrase field (what is typed becomes the phrase "Frase" brings back) \| Aa ABC abc 123 \| grid, list \| size, target app, light/dark, print, settings | `App::toolbar` | the person's request |
+
+## This round: Affinity behaviour, sidebar type, panels, grid view, icon edge
+
+| Rule | In FontCraft |
+|---|---|
+| A font another app asks for (macOS font request) | no longer turned on silently: the Missing Fonts window opens with it ("Activate" for catalog fonts, "Replace with…" for the rest), and fonts turned on there stay on while that app runs (`fontreq::handle`, `App::add_requested`, `MissingState::for_app`) |
+| Turning such a font off by hand | stays off: each requested name is handled once per run of the asking app (keyed by its process id), so Affinity asking again doesn't bring it back |
+| Inserting a glyph by double-click | after typing and selecting it, the font change pastes exactly the glyph in the font at the size the app copied (`apply_in_app_exact`, `rtf_exact`), never the app's copied HTML/RTF with its surrounding spaces; `rtf_for` now uses `\uc1` so its "?" fallbacks aren't pasted as text |
+| Sidebar type | names 13 pt, titles 11 pt bold, counts 11 pt, written by AppKit (`oslook::sys_text`): egui's copy of SF wrote "Todas las fuentes" 93.8 pt wide at 13 pt, Finder's engine 106.1 pt |
+| Panels | the details panel is the same floating card, in the same colour, as the sidebar; the centre keeps Finder's content colour |
+| Views | grid (Font Book tiles: "Aa" in the font, name, styles; sized by the size slider) \| samples (the rows of before) \| list; saved as `tiles` / `grid` / `list` |
+| App icon edge | macOS 26 glass rim inside the outline (2.5, 7 and 16 of 1024 px, brightest top-left), bottom edge slightly darker; the light plate is a pale grey (#F6F6F8 → #E4E4E8) so the rim shows |
+
+## This round: Finder sizes, Import icons, Affinity pasting, Missing Fonts in front
+
+| Rule | In FontCraft |
+|---|---|
+| Sidebar size | follows System Settings › Appearance › sidebar size (`NSTableViewDefaultSizeMode`, read every 5 s; this Mac: 3 = large): names 11/13/15 pt, titles 10/11/12 pt bold, counts as titles, rows 24/28/32 pt (estimated) |
+| Sidebar icons | SF Symbols drawn at the text's point size, large scale (`oslook::symbol_for_text`); libraries, folders, their subfolders and families use the same pictures as the Import Fonts window (`uiicons`: library, folder, set, family) at 1.35 × the text size |
+| List view | first column titled "Estado" (54 pt) |
+| A font just turned on for the app | the change waits until the system finds the font by its PostScript name (up to 3 s) and 0.7 s more, so Affinity has its new font list before the name arrives (it gave the text another font when the name came first) |
+| Copied object, not text | Affinity copies a selected text box as SVG markup in plain text: then nothing is pasted (the clipboard comes back) and the person is asked to select the text |
+| Affinity rich text | always RTF (it reads PostScript names there), never the HTML route |
+| Glyph by double-click | pasted as the system's own RTF for exactly that glyph at the copied size (`cocoa_rtf`; checked by a test that reads it back as one character) |
+| Missing Fonts window | floats above every app and takes the keyboard when it opens (`oslook::dialog_to_front`); each font in the catalog has "Activar" and "Reemplazar por…", each one not in it "Reemplazar por…" |
+
+## This round: whole text boxes, menu bar asterisk, instant glyph preview with its keys
+
+| Rule | In FontCraft |
+|---|---|
+| A whole text box selected (Affinity) | its copy is SVG markup, so FontCraft presses T (Text tool: the box goes into text editing), ⌘A, copies that text, swaps the font in it and pastes it back, then Esc and V (Move tool, box still selected). If that still gives no text, nothing is pasted (estimated key sequence; untested here) |
+| Menu bar | the activation asterisk (`uiicons` "asterisk") at 18 pt; a template image (the menu bar's own colour, System Settings › Appearance) while FontCraft works in the background, the activation green while its window is in front; click: open full screen / back to the menu bar |
+| Missing Fonts while in the menu bar | only that window comes up (FontCraft's windows unhidden without activating, the main window kept hidden), above the app; it goes back to the menu bar when it closes |
+| Glyph hover preview | shown at once (`Response::show_tooltip_ui`), not after egui's 0.5 s tooltip delay |
+| Keys for a character | `keys.rs`: the keyboard layout's 'uchr' data through UCKeyTranslate for keys 0–50 with none, ⇧, ⌥, ⌥⇧, and one dead-key step ("⌥E, E"); shown at the top right of the hover preview (15 pt) and of Character Info (17 pt) in the activation green — 60 % less than the 37.5 / 42.5 pt before, as the person asked |
+
+## This round: the menu bar asterisk's two clicks, starting hidden, switching to the target app
+
+What RightFont does (its code, selectors read from its `objc_msgSend` stubs):
+
+| Rule | In RightFont |
+|---|---|
+| Menu bar click | `-[RFUIScenesRouter toggleMainWindow:]` **0x1000c0614** (the status item's action, set in `showMenubar` **0x1000c0438**: `statusItemWithLength:-2`, image 16 × 16 pt): main window not visible → `showWindow:`, `[NSApp setActivationPolicy:0]` (Regular, 0x1000c0690), `activateIgnoringOtherApps:YES`, `makeKeyAndOrderFront:`; visible → `[mainWindowController close]` |
+| Leaving the Dock | `-[RFMainWindowController windowWillClose:]` **0x10003b030**: with "show in menu bar" on, `[NSApp setActivationPolicy:1]` (Accessory: no Dock icon, only the menu bar item) |
+| Started at login with the menu bar on | `-[RFUIScenesRouter showMainWindow]` **0x1000bec2c**: `setActivationPolicy:1` at 0x1000bee24 and no window |
+| Opened again with no window up | `-[RFAppDelegate applicationShouldHandleReopen:hasVisibleWindows:]` **0x1000db7fc** shows the main window |
+
+What FontCraft does now (macOS; `background.rs`, module `mac`):
+
+| Rule | In FontCraft |
+|---|---|
+| Start with "Mantener FontCraft en la barra de menús" on (or `--background`) | no window and out of the Dock from the first moment (winit `with_activation_policy(Accessory)`; the window eframe shows after its first frame is see-through and put away at once); only the asterisk |
+| Click while FontCraft is the active app with its window up | to the background: a full-screen window goes see-through (alpha 0) and leaves full screen (`toggleFullScreen:`), and FontCraft's windows are put away when macOS posts `NSWindowDidExitFullScreenNotification` (+ 50 ms), at most `LEAVE_FULLSCREEN_MAX_S` = 3 s later; out of the Dock (Accessory) while the asterisk is kept, then `[NSApp hide:]` so the app that was in front before comes back. Measured: click → put away in 0.7 s, the window invisible from the click |
+| Click otherwise (hidden, or another app in front) | back in the Dock (Regular), the window up, key and in front, FontCraft active; full screen asked of macOS 0.15 s later (`FULLSCREEN_LOOK_S`), looked at every 0.3 s up to 12 times (`FULLSCREEN_LOOKS`), asked once more (`FULLSCREEN_ASKS` = 2) when macOS starts the move and gives it up (willEnter without didEnter for 1.5 s, `FULLSCREEN_MOVE_STALE_MS`; seen on this Mac: willEnter 12094 ms, second ask 13689 ms, didEnter 14271 ms) |
+| Where the clicks are handled | inside the status item's own click handler, with AppKit's calls. eframe 0.37 runs FontCraft's screen code (`App::ui`) only while the window is on screen; while it is hidden or covered it runs `App::logic` alone, so the old trip to the menu bar, which waited for the next screen pass, never finished: the window was left out of full screen, small |
+| Opened again (Finder, Dock, Launchpad, Spotlight) while in the menu bar | FontCraft becoming the active app with nothing on screen, at least 2.5 s after a trip (`REOPEN_SETTLE_MS`), brings the window up full screen 0.35 s later (`REOPEN_DELAY_S`); not for the Missing Fonts window |
+| Asterisk colour | the activation green while FontCraft is active with its window up (also while macOS animates it into full screen), the menu bar's colour otherwise |
+| Background work while hidden | `App::logic`: the asterisk and the shortcut, fonts going off when their app or document closes, other apps' font requests → the Missing Fonts window (its pass is asked for with `ViewportCommand::RequestPaintWhileHidden`) |
+| Target app's icon in the toolbar | the app comes to the front first, at once: `[NSApp yieldActivationToApplication:]` (macOS 14 and later) then `-[NSRunningApplication activateWithOptions:]` (all windows); not running → `open -b` on another thread; then the selected font goes to it on its own thread. Measured: 5–10 ms (Finder as the probe). Before: `osascript … activate` waited on the main thread, where FontCraft also answers the apps' font requests (`fontreq.rs`, `CFRunLoopGetMain`), so FontCraft froze ("se queda atascado") |
+| Check | `FONTCRAFT_TEST_MENUBAR=<log>` (with `FONTCRAFT_TEST_CLICKS=driver` for real clicks posted on the asterisk) logs the window's state every second and each trip's steps |
+
+## This round: CorelDRAW and TraceDraw in Automation, the Dock icon, smaller keys
+
+| Rule | In FontCraft |
+|---|---|
+| Keys for a character | 17 pt in Character Info, 15 pt in the Glyphs page's preview (60 % less than before, as the person asked) |
+| CorelDRAW (macOS) | listed by its suite-year bundle id (`com.corel.coreldrawsuite.<year>.coreldraw`, this Mac 2026 / 27.2.0.135), found two folders deep (`/Applications/CorelDRAW Graphics Suite/27/`); Corel PHOTO-PAINT the same (`….photopaint`) |
+| CorelDRAW's font change | no AppleScript, no accessibility for its windows (only its menus answer), no font message like Affinity's, and its help says the font is chosen from the property bar's Font list. FontCraft copies the selection: text selected with the Text tool comes as rich text, its font is swapped and pasted back; a whole selected object comes as CorelDRAW's own format + PNG + TIFF + its plain words ("Ancizar\0", no RTF, seen on this Mac), so nothing is pasted (no second copy of the object) and the person is asked to select the text |
+| TraceDraw (`dev.tracedraw.app` 0.48.0) | listed; no AppleScript, no accessibility for its window, its agent server off (`mcp_window: false` in its settings), no font message; it copies a selected object as SVG text (a converted shape had no font at all), so FontCraft only turns the font on for it. It reads the installed fonts when it opens (no font-change listener), so a font turned on while it is open shows after reopening it |
+| Dock icon | each time FontCraft comes back from the menu bar into the Dock, macOS makes a new Dock tile (the generic "exec" icon for a program started outside a .app, as Craft Anything starts the build): FontCraft sets its own icon again on the next pass (`background::take_dock_icon_due`) |
+
+## This round: glyph preview beside the details panel, TraceDraw's font list
+
+| Rule | In FontCraft |
+|---|---|
+| Glyph preview (pointer on a glyph in the Glyphs page) | a 300-point drawing at 144 pt with the font's lines, in a 6-point frame, its right edge against the details panel's left edge and centred on the panel's height (the person's request), in its own layer above everything (`App::glyph_preview`, `details_card`), no longer a tooltip by the pointer |
+| How TraceDraw finds fonts | `fontdb`: it scans /System/Library/Fonts, /Library/Fonts, ~/Library/Fonts (and Adobe's folder) once when it opens ("loaded 933 font faces… system fonts read in 144 ms" in its log), no folder watcher, no CoreText notice, no rescan command; its Font Manager installs files only by hand |
+| A font turned on for TraceDraw | FontCraft keeps its file in ~/Library/Fonts/FontCraft (scanned by TraceDraw), so TraceDraw lists it the next time it opens; FontCraft says to reopen TraceDraw. The font stays 60 s after TraceDraw closes (`REOPEN_GRACE_S`, estimated) so reopening it finds the font, then goes; it also goes when FontCraft quits. TraceDraw doesn't show its documents to other apps (its window isn't in macOS accessibility), so a closed document can't be noticed by itself |
+
+## This round: DesignCraft through its control channel
+
+| Rule | In FontCraft |
+|---|---|
+| DesignCraft's channel | DesignCraft 0.20.1 (`ai.storyteller.designcraft`) listens on 127.0.0.1 only when it opens with `DESIGNCRAFT_CONTROL_PORT` set (or `--control PORT`): "designcraft: control server listening on 127.0.0.1:<port>". Its `designcraft-cli script - --connect PORT` runs one `{"command": id, "params": {…}}` per line in it and answers `{completed, results}` (or `{error: "…select text or a text frame"}`); not listening: nothing on its output |
+| Opening the channel | when FontCraft starts working with apps (macOS) it sets `DESIGNCRAFT_CONTROL_PORT=7979` for the apps macOS opens from then on (`launchctl setenv`; a value already set is kept) and takes it back when it quits (`launchctl unsetenv`). A DesignCraft open before that has no channel until it is reopened; meanwhile the routes of before are used (its Reload Fonts menu, copy → swap → paste) |
+| Font on the selection | `type.char {attrs: {fontFamily, fontStyle}}` with the face chosen in FontCraft, in the background, FontCraft staying in front: the selected text, or every character of the selected text frames (sample: frame 21 → 27 characters in Georgia Regular, live in a test DesignCraft and headless). Nothing suitable selected: "Select the text first" |
+| A font just turned on | `font.reload` first (DesignCraft reads its font folders again: "cataloged 1279"), so it is in its font menu at once; the same after the Missing Fonts window turns fonts on |
+| Glyph by double-click | `text.insert {text, raw}`, `text.move {dir: left, extend}` once per character, `type.char`, `text.move {dir: right}`: exactly the glyph in the face (sample: 1 character) |
+| Font off when its document closes | `document.list` (titles, the active one first) names DesignCraft's open documents; a font turned on for a document goes when it closes, and follows it when it is saved under a new name (same count, one title swapped) |
+| Missing Fonts | a DesignCraft document shown for the first time is asked `font.list`; the families marked `missing` open the Missing Fonts window for DesignCraft |
+| Waiting | at most `CHANNEL_WAIT_S` = 5 s for an answer (estimated; it answered at once) |
+
+## This round: PhotoCraft through its control channel
+
+| Rule | In FontCraft |
+|---|---|
+| PhotoCraft's channel | PhotoCraft 0.23.1 (`ai.storyteller.photocraft`) listens on 127.0.0.1 when it opens with `PHOTOCRAFT_CONTROL_PORT` set, and answers only after `{"method":"auth","params":{"token":…}}` with its control token (64 hex digits, from `PHOTOCRAFT_CONTROL_TOKEN` or the file `PHOTOCRAFT_CONTROL_TOKEN_FILE` names; a file readable by others is refused: "restrict it to its owner"). Requests are JSON lines `{"id","method","params"}`; `engine.execute {command, params}` runs a command (`photocraft-cli serve`'s protocol) |
+| Opening the channel | when FontCraft starts working with apps (macOS) it keeps its own token in `photocraft-control-token` (owner-only, made once from /dev/urandom) and sets `PHOTOCRAFT_CONTROL_PORT=7981` and `PHOTOCRAFT_CONTROL_TOKEN_FILE` for the apps macOS opens from then on (`launchctl setenv`; values already set are kept and used), taking back what it set when it quits. PhotoCraft runs once on a Mac (a second copy closes itself), so one open before FontCraft has no channel until reopened; meanwhile the routes of before are used |
+| Font on the selection | `type.setStyle {font, fontStyle}` with the face chosen in FontCraft, in the background: all the text of the selected type layers, size kept (checked: Helvetica 48 pt → "Georgia Regular"); with no type layer selected PhotoCraft answers "select a type layer" → "Select the text first". A font just turned on is waited for until the system lists it (PhotoCraft asks CoreText: `CTFontCollectionCreateFromAvailableFonts`) |
+| Font off when its document closes | `session.list` names the open documents (the active one first); a font turned on for a document goes when it closes, and follows it when it is saved under a new name |
+| Missing Fonts | a PhotoCraft document shown for the first time is asked `type.resolveMissingFonts {}`; the families it lacks open the Missing Fonts window for PhotoCraft |
+| Glyphs | PhotoCraft's commands have no "type at the text cursor" (type.edit needs character positions), so a double-clicked glyph is typed into it as before |
+| Check | `FontCraft --test-photocraft-channel PORT TOKENFILE` against `photocraft-cli serve --port PORT --control-token-file TOKENFILE` |
+
+## This round: PhotoCraft's font list, channels kept for the session, preview keys
+
+| Rule | In FontCraft |
+|---|---|
+| PhotoCraft reads fonts once | it lists the installed fonts when it opens and never again (tested with photocraft-cli serve: a family registered with macOS after it started → `type.fonts` gives no faces and `type.setStyle` warns "font '12SaruYellowFog' is not installed; text may render using a fallback face"; a PhotoCraft started after the font was on lists it and sets it exactly). That is why it "changed fonts a couple of times" (fonts it already had) and then not (fonts FontCraft had just turned on) |
+| A font PhotoCraft hasn't read | FontCraft asks `type.fonts {family}` first; with no faces nothing is set (the layer doesn't take a font drawn with a stand-in) and FontCraft says to quit and reopen PhotoCraft; the font stays on (and 60 s after PhotoCraft quits) so the reopened PhotoCraft has it |
+| Channel variables | `DESIGNCRAFT_CONTROL_PORT`, `PHOTOCRAFT_CONTROL_PORT` and `PHOTOCRAFT_CONTROL_TOKEN_FILE` stay set for the rest of the login session when FontCraft quits (macOS forgets them at logout): taking them back left a PhotoCraft or DesignCraft reopened while FontCraft was closed or restarting without its channel |
+| Keys in the glyph preview | 18 pt (20 % more than 15 pt, as the person asked); Character Info stays 17 pt |
+
+## This round: PhotoCraft checked live, "Lorem…", keys 18 pt
+
+| Rule | In FontCraft |
+|---|---|
+| Live check in the person's PhotoCraft (scratch document, closed unsaved) | opened by macOS with FontCraft's channel variables, PhotoCraft listened on 127.0.0.1:7981 within a second; FontCraft's token authenticated; `type.fonts`, `type.setStyle` ("Ancizar" Helvetica → Georgia Regular) and `type.resolveMissingFonts` (nothing missing, text unchanged, no dialog) worked |
+| Documents in the desktop app | the desktop PhotoCraft has no `session.list` ("unknown method… did you mean jobs.list or ui.menu.list?"): its open documents are in `ui.inspect` → `session.documents` (name, index; `active`). FontCraft asks that, then `session.list` (photocraft-cli serve) |
+| PhotoCraft's font list | built the first time PhotoCraft needs it, then kept: a font turned on after that isn't in it (no command refreshes it: type.updateAllTextLayers, type.font.library, type.fonts, type.resolveMissingFonts, type.setStyle tried), so FontCraft asks to reopen PhotoCraft for it and keeps the font on for that |
+| "Lorem…" when PhotoCraft reopens | PhotoCraft's own preference "Fill new type layers with placeholder" (`fillNewTypeLayersWithPlaceholder: true` in its preferences.json): clicking with its Type tool where there's no text makes a new type layer with Lorem ipsum. FontCraft never sends `type.pasteLoremIpsum` (no shortcut either); with FontCraft closed, PhotoCraft opened without any text edit |
+| Keys for a character | 18 pt in the glyph preview and in Character Info (`metrics::KEYS_PT`) |

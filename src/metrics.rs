@@ -22,6 +22,13 @@ pub struct GlyphMetrics {
 
 /// The preview size the person asked for.
 pub const PREVIEW_PT: f32 = 144.0;
+/// The glyph preview's drawing (300 points square, as the tooltip it replaces) and the frame's
+/// padding around it; the preview's right edge touches the details panel's left edge.
+pub const PREVIEW_SIDE: f32 = 300.0;
+pub const PREVIEW_PAD: f32 = 6.0;
+/// The keys that type a character, in the glyph preview and in Character Info (the person's
+/// latest sizes: 18 pt in both).
+pub const KEYS_PT: f32 = 18.0;
 /// Glyph cells, from RightFont's -[RFFontGlyphView updateLayer] (0x1000670f4): corner radius
 /// (`fmov d0, #8.0`), the chosen glyph's tint (0.08 at 0x100282548) and the hover tint
 /// (0.025 at 0x1002825d0).
@@ -155,5 +162,15 @@ impl App {
             p.text(Pos2::new((wl + wr) / 2.0, img.bottom() + 2.0), Align2::CENTER_TOP, t(K::MWidth), FontId::proportional(10.0), Color32::from_white_alpha(170));
         }
         p.image(m.tex.id(), img, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        // The keys that type this character with the keyboard in use, at the top right in the
+        // activation asterisk's green, easy to see on the black: the person asked for 5x the first
+        // size (85 / 75 pt), then for half of that (42.5 / 37.5 pt), then for 60 % less (17 / 15
+        // pt), then for the preview's 20 % more (18 pt), and Character Info the same: 18 pt in both.
+        if let Some(keys) = self.glyph_char(gid).and_then(crate::keys::shortcut_for) {
+            let at = Pos2::new(area.right() - 12.0, area.top() + 12.0);
+            let font = FontId::proportional(crate::metrics::KEYS_PT);
+            let r = crate::finder::text(ui, at, Align2::RIGHT_TOP, &keys, font.size, 0.3, crate::libs::LIME, &font);
+            let _ = r;
+        }
     }
 }

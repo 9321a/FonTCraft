@@ -5,55 +5,111 @@ use eframe::egui::{self, Color32, Pos2, CornerRadius, Stroke, Vec2};
 use crate::mechanics;
 use std::path::PathBuf;
 
-/// Ubuntu's ten accent colours (Yaru, Settings › Appearance), in its order, offered on every system:
-/// (name, colour on light panels, colour on dark panels — the same colour lifted 22 % towards white
-/// so it reads on the dark background).
-pub const ACCENTS: [(crate::i18n::K, Color32, Color32); 10] = {
-    use crate::i18n::K;
+/// macOS system theme colours (System Settings › Appearance › Accent color / Theme):
+/// 0: Multicolor (Rainbow swatch, uses app/system dynamic accent)
+/// 1: Azul (Blue, #007AFF light / #0A84FF dark)
+/// 2: Púrpura (Purple, #AF52DE light / #BF5AF2 dark)
+/// 3: Rosa (Pink, #FF2D55 light / #FF375F dark)
+/// 4: Rojo (Red, #FF3B30 light / #FF453A dark)
+/// 5: Naranja (Orange, #FF9500 light / #FF9F0A dark)
+/// 6: Amarillo (Yellow, #FFCC00 light / #FFD60A dark)
+/// 7: Verde (Green, #28CD41 light / #30D158 dark)
+/// 8: Grafito (Graphite, #8E8E93 light / #98989D dark)
+pub const ACCENTS: [(&'static str, Color32, Color32); 8] = {
     const fn hex(v: u32) -> Color32 {
         Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
     }
     [
-        (K::AccOrange, hex(0xe95420), hex(0xee7a51)),
-        (K::AccBark, hex(0x787859), hex(0x96967e)),
-        (K::AccSage, hex(0x657b69), hex(0x87988a)),
-        (K::AccOlive, hex(0x4b8501), hex(0x73a039)),
-        (K::AccViridian, hex(0x03875b), hex(0x3aa17f)),
-        (K::AccPrussian, hex(0x308280), hex(0x5e9e9c)),
-        (K::AccUbBlue, hex(0x0073e5), hex(0x3892eb)),
-        (K::AccUbPurple, hex(0x7764d8), hex(0x9586e1)),
-        (K::AccMagenta, hex(0xb34cb3), hex(0xc473c4)),
-        (K::AccUbRed, hex(0xda3450), hex(0xe26176)),
+        ("Azul", hex(0x007aff), hex(0x0a84ff)),
+        ("Púrpura", hex(0xaf52de), hex(0xbf5af2)),
+        ("Rosa", hex(0xff2d55), hex(0xff375f)),
+        ("Rojo", hex(0xff3b30), hex(0xff453a)),
+        ("Naranja", hex(0xff9500), hex(0xff9f0a)),
+        ("Amarillo", hex(0xffcc00), hex(0xffd60a)),
+        ("Verde", hex(0x28cd41), hex(0x30d158)),
+        ("Grafito", hex(0x8e8e93), hex(0x98989d)),
     ]
 };
 
-/// `accent` value meaning "the system's accent colour" (the default), after Ubuntu's ten.
-pub const SYSTEM_ACCENT: usize = 10;
+/// `accent` value meaning Multicolor / "the system's accent colour" (the default, matching macOS).
+pub const SYSTEM_ACCENT: usize = 0;
+pub const MULTICOLOR: usize = 0;
 
-/// The accent for light (`dark` false) or dark panels: a swatch, or the system's own colour (on
-/// dark panels lifted a little, as the systems do, so it reads on the dark background).
+/// The accent for light (`dark` false) or dark panels: a macOS swatch, or Multicolor (host system accent / Apple Blue).
 pub fn accent_color(accent: usize, dark: bool) -> Color32 {
-    if accent >= ACCENTS.len() {
-        let sys = crate::oslook::system_accent().unwrap_or(ACCENTS[6].1);
-        return if dark && !cfg!(target_os = "macos") { mix(sys, Color32::WHITE, 0.2) } else { sys };
+    if accent == MULTICOLOR || accent > ACCENTS.len() {
+        if let Some(sys) = crate::oslook::system_accent() {
+            let is_graphite = (sys.r() as i16 - sys.g() as i16).abs() <= 4 && (sys.g() as i16 - sys.b() as i16).abs() <= 4;
+            if !is_graphite {
+                return if dark && !cfg!(target_os = "macos") { mix(sys, Color32::WHITE, 0.2) } else { sys };
+            }
+        }
+        // In macOS, the default host accent when Multicolor is selected is Apple Blue
+        return if dark { Color32::from_rgb(0x0a, 0x84, 0xff) } else { Color32::from_rgb(0x00, 0x7a, 0xff) };
     }
-    let a = ACCENTS[accent];
+    let a = ACCENTS[accent - 1];
     if dark { a.2 } else { a.1 }
 }
 
-/// The background of a sidebar row, as RightFont's -[RFNavigationItemRowView drawRect:]
-/// (0x1000c61c4) paints it: the chosen row black at 6 % (0x1002822a8) on light panels, white at 9 %
-/// (0x100282750) on dark ones; under the pointer black at 2.8 % (0x100282748) / white at 4 %
-/// (0x1002822a0). The accent colour is kept for the text and icon of the chosen row.
+/// The macOS Multicolor rainbow swatch: 8 colorful segments radiating from center.
+pub fn paint_multicolor_swatch(p: &egui::Painter, c: Pos2, radius: f32) {
+    let colors = [
+        Color32::from_rgb(0xff, 0x3b, 0x30), // Red
+        Color32::from_rgb(0xff, 0x95, 0x00), // Orange
+        Color32::from_rgb(0xff, 0xcc, 0x00), // Yellow
+        Color32::from_rgb(0x28, 0xcd, 0x41), // Green
+        Color32::from_rgb(0x00, 0x7a, 0xff), // Blue
+        Color32::from_rgb(0x58, 0x56, 0xd6), // Indigo
+        Color32::from_rgb(0xaf, 0x52, 0xde), // Purple
+        Color32::from_rgb(0xff, 0x2d, 0x55), // Pink
+    ];
+    let n = colors.len();
+    for i in 0..n {
+        let a1 = i as f32 * std::f32::consts::TAU / n as f32 - std::f32::consts::FRAC_PI_2;
+        let a2 = (i + 1) as f32 * std::f32::consts::TAU / n as f32 - std::f32::consts::FRAC_PI_2;
+        let p1 = c + Vec2::angled(a1) * radius;
+        let p2 = c + Vec2::angled(a2) * radius;
+        p.add(egui::Shape::convex_polygon(vec![c, p1, p2], colors[i], Stroke::NONE));
+    }
+}
+
+/// The background of a sidebar row, matching macOS Finder and RightFont's Source List:
+/// clean rounded pill with subtle hover highlight or selection fill.
 pub fn row_tint(dark: bool, selected: bool, hovered: bool) -> Option<Color32> {
-    let a = match (selected, hovered, dark) {
-        (true, _, false) => 0.06,
-        (true, _, true) => 0.09,
-        (false, true, false) => 0.028,
-        (false, true, true) => 0.04,
-        _ => return None,
-    };
-    Some(if dark { Color32::WHITE } else { Color32::BLACK }.gamma_multiply(a))
+    if selected {
+        Some(if dark { Color32::from_rgba_premultiplied(255, 255, 255, 32) } else { Color32::from_rgba_premultiplied(0, 0, 0, 20) })
+    } else if hovered {
+        Some(if dark { Color32::WHITE.gamma_multiply(0.04) } else { Color32::BLACK.gamma_multiply(0.028) })
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ViewMode {
+    /// Tiles with "Aa" in each family, as the system's Font Book shows its grid.
+    Grid,
+    /// Each family's sample in a row (FontCraft's specimen view; called "grid" in earlier settings).
+    #[default]
+    Samples,
+    /// The detailed table.
+    List,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum WidgetStyle {
+    #[default]
+    Default,
+    Dark,
+    Clear,
+    Tinted,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ConfirmMode {
+    #[default]
+    Auto,
+    Always,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -77,6 +133,9 @@ pub struct Settings {
     pub lang: usize,
     pub theme: ThemeChoice,
     pub accent: usize,
+    pub widget_style: WidgetStyle,
+    pub view_mode: ViewMode,
+    pub confirm_mode: ConfirmMode,
     /// 0 = compact, 1 = regular, 2 = roomy
     pub density: usize,
     pub default_preview: String,
@@ -124,6 +183,9 @@ impl Default for Settings {
             lang,
             theme: ThemeChoice::System,
             accent: SYSTEM_ACCENT,
+            widget_style: WidgetStyle::Default,
+            view_mode: ViewMode::Samples,
+            confirm_mode: ConfirmMode::Auto,
             density: 1,
             default_preview: crate::i18n::tr(lang, crate::i18n::K::Pangram).into(),
             // RightFont: list preview size 16 when never set (-[RFPreferencesHandler fontPreviewListViewFontSize], 0x1000aa540).
@@ -219,9 +281,34 @@ impl Settings {
                             _ => ThemeChoice::System,
                         }
                     }
-                    // "accent3": "system" or one of Ubuntu's ten. Older keys ("accent", "accent2") named
-                    // VectorCraft's six swatches, which are gone, so they fall back to the system's colour.
-                    "accent3" => s.accent = if v == "system" { SYSTEM_ACCENT } else { v.parse().unwrap_or(SYSTEM_ACCENT).min(SYSTEM_ACCENT) },
+                    "accent3" => {
+                        s.accent = match v {
+                            "system" | "multicolor" => SYSTEM_ACCENT,
+                            _ => v.parse().unwrap_or(SYSTEM_ACCENT).min(ACCENTS.len()),
+                        }
+                    }
+                    "widget_style" => {
+                        s.widget_style = match v {
+                            "dark" => WidgetStyle::Dark,
+                            "clear" | "transparent" => WidgetStyle::Clear,
+                            "tinted" => WidgetStyle::Tinted,
+                            _ => WidgetStyle::Default,
+                        }
+                    }
+                    "view_mode" => {
+                        s.view_mode = match v {
+                            "list" => ViewMode::List,
+                            "tiles" => ViewMode::Grid,
+                            // "grid" was the samples view in earlier versions.
+                            _ => ViewMode::Samples,
+                        }
+                    }
+                    "confirm_mode" => {
+                        s.confirm_mode = match v {
+                            "always" => ConfirmMode::Always,
+                            _ => ConfirmMode::Auto,
+                        }
+                    }
                     "density" => s.density = v.parse().unwrap_or(1).min(2),
                     "preview" => s.default_preview = v.to_string(),
                     "size" => s.default_size = v.parse().unwrap_or(mechanics::LIST_PREVIEW_SIZE).clamp(10.0, 160.0),
@@ -278,11 +365,26 @@ impl Settings {
             ThemeChoice::Light => "light",
             ThemeChoice::Dark => "dark",
         };
+        let ws = match self.widget_style {
+            WidgetStyle::Default => "default",
+            WidgetStyle::Dark => "dark",
+            WidgetStyle::Clear => "clear",
+            WidgetStyle::Tinted => "tinted",
+        };
+        let vm = match self.view_mode {
+            ViewMode::Grid => "tiles",
+            ViewMode::Samples => "grid",
+            ViewMode::List => "list",
+        };
+        let cm = match self.confirm_mode {
+            ConfirmMode::Auto => "auto",
+            ConfirmMode::Always => "always",
+        };
         let b = |x: bool| if x { "1" } else { "0" };
         let text = format!(
-            "lang={}\ntheme={theme}\naccent3={}\ndensity={}\npreview={}\nsize={}\nstyle_count={}\ndetails={}\nwaterfall={}\nwarn_missing={}\nsystem={}\ncomputer={}\nuser={}\n",
+            "lang={}\ntheme={theme}\naccent3={}\nwidget_style={ws}\nview_mode={vm}\nconfirm_mode={cm}\ndensity={}\npreview={}\nsize={}\nstyle_count={}\ndetails={}\nwaterfall={}\nwarn_missing={}\nsystem={}\ncomputer={}\nuser={}\n",
             crate::i18n::LANGS[self.lang].code,
-            if self.accent >= SYSTEM_ACCENT { "system".to_string() } else { self.accent.to_string() },
+            if self.accent == MULTICOLOR { "multicolor".to_string() } else { self.accent.to_string() },
             self.density,
             self.default_preview.replace('\n', " "),
             self.default_size.round(),

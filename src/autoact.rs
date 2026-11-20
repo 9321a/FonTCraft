@@ -200,7 +200,24 @@ const CATALOG: &[AppDef] = &[
     AppDef { name: "Adobe InDesign", bundle: "win.adobe.indesign", ps_names: false, win: &["InDesign.exe"], ..MAC },
     AppDef { name: "Affinity", bundle: "win.affinity", win: &["Affinity.exe", "Designer.exe", "Photo.exe", "Publisher.exe"], ..MAC },
     AppDef { name: "Figma", bundle: "win.figma", win: &["Figma.exe"], ..MAC },
+    // CorelDRAW for Mac names itself by the suite's year (this Mac: CorelDRAW 2026,
+    // com.corel.coreldrawsuite.2026.coreldraw, in /Applications/CorelDRAW Graphics Suite/27), newest
+    // first; the first one installed is the one listed. It has no AppleScript, no accessibility for
+    // its windows and no font message like Affinity's: a selected text gets its font by copy →
+    // swap → paste, and only when CorelDRAW copied rich text (`copy_must_be_rich_text`).
+    AppDef { name: "CorelDRAW", bundle: "com.corel.coreldrawsuite.2027.coreldraw", ps_names: false, ..MAC },
+    AppDef { name: "CorelDRAW", bundle: "com.corel.coreldrawsuite.2026.coreldraw", ps_names: false, ..MAC },
+    AppDef { name: "CorelDRAW", bundle: "com.corel.coreldrawsuite.2025.coreldraw", ps_names: false, ..MAC },
+    AppDef { name: "CorelDRAW", bundle: "com.corel.coreldrawsuite.2024.coreldraw", ps_names: false, ..MAC },
+    AppDef { name: "CorelDRAW", bundle: "com.corel.coreldrawsuite.2023.coreldraw", ps_names: false, ..MAC },
+    AppDef { name: "CorelDRAW", bundle: "com.corel.coreldrawsuite.2022.coreldraw", ps_names: false, ..MAC },
+    AppDef { name: "CorelDRAW", bundle: "com.corel.coreldrawsuite.2021.coreldraw", ps_names: false, ..MAC },
     AppDef { name: "CorelDRAW", bundle: "com.corel.coreldraw", ps_names: false, win: &["CorelDRW.exe"], ..MAC },
+    // TraceDraw (dev.tracedraw.app), the CorelDRAW-like editor: no AppleScript, no font message, no
+    // accessibility for its window, its agent server off by default, and it copies objects as SVG
+    // text (pasting would add a copy): FontCraft turns the font on for it. It reads the installed
+    // fonts only when it opens (log: "system fonts read in 144 ms"; no font-change listener).
+    AppDef { name: "TraceDraw", bundle: "dev.tracedraw.app", ps_names: false, how: How::Activate, fonts: FontRead::AtStart, linux: &["tracedraw"], win: &["tracedraw.exe", "TraceDraw.exe"], ..MAC },
     AppDef { name: "Lunacy", bundle: "com.icons8.Lunacy", linux: &["lunacy"], win: &["Lunacy.exe"], ..MAC },
     AppDef { name: "Linearity Curve", bundle: "com.linearity.vn", ..MAC },
     // The ArtCraft apps (Rust, winit + Skia) read the installed fonts when they open; VectorCraft
@@ -211,8 +228,6 @@ const CATALOG: &[AppDef] = &[
     AppDef { name: "DesignCraft", bundle: "ai.storyteller.designcraft", ps_names: false, fonts: FontRead::Menu(DESIGNCRAFT_RELOAD), linux: &["designcraft"], win: &["DesignCraft.exe"], ..MAC },
     AppDef { name: "PhotoCraft", bundle: "ai.storyteller.photocraft", ps_names: false, fonts: FontRead::AtStart, linux: &["photocraft"], win: &["PhotoCraft.exe"], ..MAC },
     AppDef { name: "PdfCraft", bundle: "ai.storyteller.pdfcraft", ps_names: false, fonts: FontRead::AtStart, linux: &["pdfcraft"], win: &["PdfCraft.exe"], ..MAC },
-    AppDef { name: "TextureCraft", bundle: "ai.storyteller.texturecraft", ps_names: false, fonts: FontRead::AtStart, linux: &["texturecraft"], win: &["TextureCraft.exe"], ..MAC },
-    AppDef { name: "SolidCraft", bundle: "io.tangencylabs.solidcraft", ps_names: false, fonts: FontRead::AtStart, linux: &["solidcraft"], win: &["SolidCraft.exe"], ..MAC },
     // More ArtCraft apps the person uses (bundle ids in the family's pattern; the program names find
     // them on every system). The text, slide and sheet apps get the selected text's font by paste.
     AppDef { name: "WordCraft", bundle: "ai.storyteller.wordcraft", ps_names: false, fonts: FontRead::AtStart, linux: &["wordcraft"], win: &["WordCraft.exe"], ..MAC },
@@ -222,6 +237,10 @@ const CATALOG: &[AppDef] = &[
     AppDef { name: "PotCraft", bundle: "ai.storyteller.potcraft", ps_names: false, fonts: FontRead::AtStart, linux: &["potcraft"], win: &["PotCraft.exe"], ..MAC },
     AppDef { name: "AniCraft", bundle: "ai.storyteller.anicraft", ps_names: false, fonts: FontRead::AtStart, linux: &["anicraft"], win: &["AniCraft.exe"], ..MAC },
     AppDef { name: "Canva", bundle: "com.canva.CanvaDesktop", linux: &["canva"], win: &["Canva.exe"], ..MAC },
+    AppDef { name: "Corel PHOTO-PAINT", bundle: "com.corel.coreldrawsuite.2027.photopaint", ps_names: false, ..MAC },
+    AppDef { name: "Corel PHOTO-PAINT", bundle: "com.corel.coreldrawsuite.2026.photopaint", ps_names: false, ..MAC },
+    AppDef { name: "Corel PHOTO-PAINT", bundle: "com.corel.coreldrawsuite.2025.photopaint", ps_names: false, ..MAC },
+    AppDef { name: "Corel PHOTO-PAINT", bundle: "com.corel.coreldrawsuite.2024.photopaint", ps_names: false, ..MAC },
     AppDef { name: "Corel PHOTO-PAINT", bundle: "com.corel.photopaint", win: &["PhotoPnt.exe"], ..MAC },
     AppDef { name: "Adobe Express", bundle: "com.adobe.express", win: &["Adobe Express.exe", "Express.exe"], ..MAC },
     AppDef { name: "Microsoft Designer", bundle: "com.microsoft.designer", win: &["Designer.exe"], ..MAC },
@@ -252,6 +271,44 @@ impl InstalledApp {
     }
 }
 
+/// Checks whether an application is in the user's supported list of graphics, design, office,
+/// and font-activated applications. Unsupported apps (such as WhatsApp, browsers, chat clients)
+/// are excluded and will never trigger font activation or missing fonts dialogs.
+pub fn is_supported_app(bundle: &str, name: &str) -> bool {
+    let b = bundle.trim().to_lowercase();
+    let n = name.trim().to_lowercase();
+    if b.is_empty() && n.is_empty() {
+        return false;
+    }
+    // Explicit blacklist of apps that must never trigger missing font alerts
+    if b.contains("whatsapp") || n.contains("whatsapp")
+        || b.contains("telegram") || n.contains("telegram")
+        || b.contains("slack") || n.contains("slack")
+        || b.contains("discord") || n.contains("discord")
+        || b.contains("chrome") || n.contains("chrome")
+        || b.contains("safari") || n.contains("safari")
+        || b.contains("firefox") || n.contains("firefox")
+        || b.contains("zoom") || n.contains("zoom")
+        || b.contains("finder") || n.contains("finder")
+        || b.contains("solidcraft") || n.contains("solidcraft")
+        || b.contains("texturecraft") || n.contains("texturecraft")
+        || b.contains("blender") || n.contains("blender")
+        || b.contains("fontlab") || n.contains("fontlab")
+        || b.contains("outlook") || n.contains("outlook")
+    {
+        return false;
+    }
+    // Check against CATALOG
+    CATALOG.iter().any(|d| {
+        let db = d.bundle.to_lowercase();
+        let dn = d.name.to_lowercase();
+        (!b.is_empty() && (b == db || b.starts_with(&db) || db.starts_with(&b)))
+            || (!n.is_empty() && (n == dn || n.contains(&dn) || dn.contains(&n)))
+            || d.linux.iter().any(|l| l.eq_ignore_ascii_case(&n) || l.eq_ignore_ascii_case(&b))
+            || d.win.iter().any(|w| w.eq_ignore_ascii_case(&n) || w.eq_ignore_ascii_case(&b))
+    })
+}
+
 /// What the watcher thread sees.
 #[derive(Default)]
 struct Watch {
@@ -263,6 +320,16 @@ struct Watch {
     want_docs: HashSet<String>,
     /// The document open in front in the app FontCraft works with, and that app's key.
     front_doc: Option<(PathBuf, String)>,
+    /// DesignCraft documents just brought to the front that use fonts not installed: (document
+    /// title, families), for the Missing Fonts window (read through DesignCraft's channel).
+    designcraft_missing: Vec<(String, Vec<String>)>,
+    /// DesignCraft documents whose title changed (saved under a name: "Untitled-1" → "Poster"):
+    /// (old, new), so their fonts follow them instead of going off.
+    designcraft_renames: Vec<(String, String)>,
+    /// The same for PhotoCraft (its channel): documents shown with fonts not installed, and
+    /// documents saved under a new name.
+    photocraft_missing: Vec<(String, Vec<String>)>,
+    photocraft_renames: Vec<(String, String)>,
 }
 
 /// The file of the document open in front in an app, best effort on each system:
@@ -414,6 +481,16 @@ struct Record {
     files: Vec<PathBuf>,
     bundle: String,
     doc: Option<String>,
+    /// Since when its app has been closed (apps that read fonts only when they open keep the
+    /// fonts a moment, see `REOPEN_GRACE_S`).
+    gone_since: Option<std::time::Instant>,
+}
+
+/// Whether this app (bundle id) reads the installed fonts only when it opens (TraceDraw, the
+/// ArtCraft apps, LibreOffice on a Mac): a font turned on while it is open shows in its font
+/// menu after it is reopened.
+fn reads_fonts_at_start(bundle: &str) -> bool {
+    CATALOG.iter().any(|d| d.bundle == bundle && d.needs_reopen())
 }
 
 pub enum Outcome {
@@ -449,6 +526,16 @@ pub struct AutoAct {
 }
 
 impl AutoAct {
+    /// DesignCraft documents that came to the front with fonts not installed (see `Watch`).
+    pub fn take_designcraft_missing(&self) -> Vec<(String, Vec<String>)> {
+        self.watch.lock().map(|mut w| std::mem::take(&mut w.designcraft_missing)).unwrap_or_default()
+    }
+
+    /// PhotoCraft documents that came to the front with fonts not installed (see `Watch`).
+    pub fn take_photocraft_missing(&self) -> Vec<(String, Vec<String>)> {
+        self.watch.lock().map(|mut w| std::mem::take(&mut w.photocraft_missing)).unwrap_or_default()
+    }
+
     /// The document open in front in the app FontCraft works with, and that app's key.
     pub fn front_document(&self) -> Option<(PathBuf, String)> {
         self.watch.lock().ok()?.front_doc.clone()
@@ -462,7 +549,7 @@ impl AutoAct {
                 w.want_docs.insert(bundle.clone());
             }
         }
-        self.records.push(Record { files, bundle, doc });
+        self.records.push(Record { files, bundle, doc, gone_since: None });
     }
 }
 
@@ -617,9 +704,7 @@ pub fn find_installed() -> Vec<InstalledApp> {
             ("GridCraft", "ai.storyteller.gridcraft"),
             ("FilmCraft", "ai.storyteller.filmcraft"),
             ("PotCraft", "ai.storyteller.potcraft"),
-            ("SolidCraft", "io.tangencylabs.solidcraft"),
             ("PdfCraft", "ai.storyteller.pdfcraft"),
-            ("TextureCraft", "ai.storyteller.texturecraft"),
             ("Microsoft Word", "com.microsoft.office.word"),
             ("Microsoft Excel", "com.microsoft.office.excel"),
             ("Microsoft PowerPoint", "com.microsoft.office.powerpoint"),
@@ -675,23 +760,48 @@ pub fn find_installed() -> Vec<InstalledApp> {
                 if p.extension().is_some_and(|x| x == "app") {
                     add(p);
                 } else if p.is_dir() {
+                    // A vendor folder, and one more level for suites kept by version
+                    // (/Applications/CorelDRAW Graphics Suite/27/CorelDRAW 2026.app).
                     if let Ok(inner) = std::fs::read_dir(&p) {
-                        for q in inner.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "app")) {
-                            add(q);
+                        for q in inner.flatten().map(|e| e.path()) {
+                            if q.extension().is_some_and(|x| x == "app") {
+                                add(q);
+                            } else if q.is_dir() {
+                                if let Ok(deeper) = std::fs::read_dir(&q) {
+                                    for r in deeper.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "app")) {
+                                        add(r);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         for def in CATALOG {
-            if def.bundle.is_empty() || found.iter().any(|f| f.def.bundle == def.bundle) {
+            if def.bundle.is_empty() || def.bundle.starts_with("win.") || def.bundle.starts_with("office.libreoffice.") {
                 continue;
             }
-            if let Some((path, _, _)) = candidates.iter().find(|(_, id, stem)| id == def.bundle || def.name.eq_ignore_ascii_case(stem)) {
+            if found.iter().any(|f| f.def.name.eq_ignore_ascii_case(def.name)) {
+                continue;
+            }
+            let hit = candidates.iter().find(|(_, id, _)| id == def.bundle)
+                .or_else(|| candidates.iter().find(|(_, _, stem)| def.name.eq_ignore_ascii_case(stem)));
+            if let Some((path, _, _)) = hit {
+                if found.iter().any(|f| f.path == *path) {
+                    continue;
+                }
                 let procs = vec![format!("{}/Contents/MacOS/", path.display())];
                 found.push(InstalledApp { def, icon: app_icon(path), path: path.clone(), procs, version: bundle_version(path), tex: None });
             }
         }
+        let mut seen_names = std::collections::HashSet::new();
+        let mut seen_paths = std::collections::HashSet::new();
+        found.retain(|app| {
+            let n = app.def.name.to_lowercase();
+            let p = app.path.clone();
+            seen_names.insert(n) && seen_paths.insert(p)
+        });
     }
     #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
     {
@@ -904,10 +1014,10 @@ fn front_doc_script(bundle: &str, kind: Docs) -> String {
 fn wait_front(bundle: &str) {
     let mut waited = 0;
     while !front_bundle().is_some_and(|b| b.eq_ignore_ascii_case(bundle)) && waited < 2000 {
-        std::thread::sleep(Duration::from_millis(100));
-        waited += 100;
+        std::thread::sleep(Duration::from_millis(20));
+        waited += 20;
     }
-    std::thread::sleep(Duration::from_millis(150));
+    std::thread::sleep(Duration::from_millis(30));
 }
 
 /// The app in front right now (its bundle id), asked directly from Cocoa or lsappinfo.
@@ -1095,7 +1205,600 @@ fn rtf_escape(text: &str) -> String {
 
 /// Rich text of `text` set in `font` without unwanted leading or trailing spaces.
 pub fn rtf_for(text: &str, font: &str) -> String {
-    format!("{{\\rtf1\\ansi\\ansicpg1252{{\\fonttbl{{\\f0\\fnil\\fcharset0 {font};}}}}\\uc0\\f0{{{}}}}}", rtf_escape(text))
+    // \uc1: each \uN is followed by one fallback character ("?") that readers skip; with \uc0 the
+    // "?" was kept as text.
+    format!("{{\\rtf1\\ansi\\ansicpg1252{{\\fonttbl{{\\f0\\fnil\\fcharset0 {font};}}}}\\uc1\\f0{{{}}}}}", rtf_escape(text))
+}
+
+/// Exactly `text` in `font` at `half_points` (RTF \fs, half points), nothing before or after it:
+/// what goes back into the app when a glyph is inserted, so no space or line comes with it.
+fn rtf_exact(text: &str, font: &str, half_points: Option<u32>) -> String {
+    let size = half_points.map(|h| format!("\\fs{h}")).unwrap_or_default();
+    format!("{{\\rtf1\\ansi\\ansicpg1252\\uc1{{\\fonttbl{{\\f0\\fnil\\fcharset0 {font};}}}}\\f0{size}{{{}}}}}", rtf_escape(text))
+}
+
+/// Whether copied plain text is markup for an object rather than text (SVG or XML, as Affinity
+/// copies a selected text box).
+fn looks_like_markup(plain: &str) -> bool {
+    let t = plain.trim_start();
+    t.starts_with("<?xml") || t.starts_with("<svg") || t.starts_with("<!DOCTYPE svg") || (t.starts_with('<') && t.contains("<svg"))
+}
+
+/// Apps whose pasted rich text should always be RTF (they read PostScript names there).
+fn bundle_prefers_rtf(bundle: &str) -> bool {
+    bundle.starts_with("com.seriflabs.") || bundle == "com.canva.affinity" || bundle.starts_with("com.corel.")
+}
+
+/// Apps whose copy is text only when it comes as rich text: CorelDRAW (and PHOTO-PAINT) copy a
+/// whole selected object as their own format, PNG, TIFF and its plain words ("Ancizar\0" on this
+/// Mac, no RTF), and pasting rich text back would add a second object. Text selected with the
+/// Text tool copies as RTF; only then is the font swapped and pasted.
+fn copy_must_be_rich_text(bundle: &str) -> bool {
+    bundle.starts_with("com.corel.")
+}
+
+/// The notification RightFont posts for Affinity: -[RFFontActivator fontByNotification:]
+/// (0x1000528e8) posts this name (CFString 0x10031ffd8) on the distributed notification centre,
+/// with the font's PostScript name as its object. Affinity's -[AppController thirdPartyFontChanged:]
+/// (libcocoaui) takes that name and calls its own text command changeFontByName:field:preview:, the
+/// one its font picker uses: the font goes on the selected text, or on every selected text box.
+const FONT_SELECTED_NOTICE: &str = "com.marklyapp.RightFont.FontSelectedNotification";
+
+/// Apps that take the font from RightFont's notification: every Affinity (Designer, Photo and
+/// Publisher 1 and 2 with their betas, and Affinity 3 by Canva). RightFont's app ids 13, 14, 35–42,
+/// 47–49 and 52 all go to fontByNotification: in its per-app switch (0x10004c360, table 0x1002824c5).
+fn takes_font_notice(bundle: &str) -> bool {
+    bundle.starts_with("com.seriflabs.affinity") || bundle == "com.canva.affinity"
+}
+
+/// Posts RightFont's "font selected" notification with `font` (a PostScript name), delivered at once
+/// even to an app in the background (deliverImmediately YES, as RightFont: `mov w5, #1` at
+/// 0x10005292c). Nothing is copied, pasted or typed, so no Accessibility permission is needed.
+fn post_font_selected(font: &str) -> bool {
+    post_distributed(FONT_SELECTED_NOTICE, font)
+}
+
+/// `name` with `object` on the distributed notification centre, delivered immediately.
+fn post_distributed(name: &str, object: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::runtime::{AnyObject, Bool};
+        use objc2::{class, msg_send};
+        use objc2_foundation::NSString;
+        let run = || unsafe {
+            let center: *mut AnyObject = msg_send![class!(NSDistributedNotificationCenter), defaultCenter];
+            if center.is_null() {
+                return false;
+            }
+            let name = NSString::from_str(name);
+            let object = NSString::from_str(object);
+            let no_info: *const AnyObject = std::ptr::null();
+            let _: () = msg_send![center, postNotificationName: &*name, object: &*object, userInfo: no_info, deliverImmediately: Bool::YES];
+            true
+        };
+        objc2::exception::catch(std::panic::AssertUnwindSafe(run)).unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (name, object);
+        false
+    }
+}
+
+/// DesignCraft's control channel. DesignCraft (ai.storyteller.designcraft) listens on 127.0.0.1 when
+/// it opens with DESIGNCRAFT_CONTROL_PORT set ("designcraft: control server listening on
+/// 127.0.0.1:<port>"; "… is not a port number; the control channel is off" otherwise), and its own
+/// designcraft-cli runs command scripts in it (`script - --connect PORT`, one
+/// `{"command": id, "params": {…}}` per line). FontCraft sets that variable for the apps macOS opens
+/// from then on (`launchctl setenv`, kept for the login session), so a DesignCraft opened while
+/// FontCraft runs works as Affinity does, in the background, nothing copied or pasted:
+/// - `type.char {attrs: {fontFamily, fontStyle}}` sets the font of the selected text, or of all the
+///   text of the selected text frames (DesignCraft's sample: frame 21 selected → its 27 characters);
+///   with nothing suitable selected it answers "select text or a text frame";
+/// - `font.reload` reads the font folders again, so a font just turned on is in its font menu;
+/// - `document.list` names the open documents (a font goes off when its document closes);
+/// - `font.list` marks the fonts of the active document that aren't installed (Missing Fonts);
+/// - `text.insert`, `text.move {dir: left, extend}` and `type.char` put a glyph in its font.
+/// A DesignCraft opened before FontCraft has no channel: the routes of before are used for it.
+pub(crate) mod designcraft {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    pub const BUNDLE: &str = "ai.storyteller.designcraft";
+    /// The port FontCraft asks DesignCraft to listen on, unless one is set already.
+    const DEFAULT_PORT: &str = "7979";
+    static PORT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    /// FontCraft set the variable itself (so it takes it back when it quits).
+    static SET_BY_FONTCRAFT: AtomicBool = AtomicBool::new(false);
+
+    /// What DesignCraft said to a script.
+    #[derive(Debug, PartialEq)]
+    pub enum Answer {
+        /// Every step ran; their results.
+        Done(Vec<serde_json::Value>),
+        /// DesignCraft answered but refused a step (nothing suitable selected, no document…).
+        Refused,
+        /// Nothing listens (DesignCraft closed, or opened without its channel).
+        Unreachable,
+    }
+
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn launchctl(args: &[&str]) -> Option<String> {
+        let out = crate::paths::command("launchctl").args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    /// At FontCraft's start (macOS): DesignCraft opened from now on listens for FontCraft. A port
+    /// the person (or another tool) already set is kept.
+    pub fn offer_channel() {
+        #[cfg(target_os = "macos")]
+        {
+            let own = std::env::var("DESIGNCRAFT_CONTROL_PORT").ok().filter(|p| !p.trim().is_empty());
+            let set = launchctl(&["getenv", "DESIGNCRAFT_CONTROL_PORT"]).filter(|p| !p.is_empty());
+            let port = match own.or(set) {
+                Some(p) => p,
+                None => {
+                    if launchctl(&["setenv", "DESIGNCRAFT_CONTROL_PORT", DEFAULT_PORT]).is_some() {
+                        SET_BY_FONTCRAFT.store(true, Ordering::SeqCst);
+                    }
+                    DEFAULT_PORT.to_string()
+                }
+            };
+            let _ = PORT.set(port);
+        }
+    }
+
+    /// When FontCraft quits: the variable stays for the rest of the login session (macOS forgets it
+    /// at logout), so a DesignCraft reopened while FontCraft is closed or restarting still opens
+    /// its channel; taking it back here left such a DesignCraft without one.
+    pub fn withdraw_channel() {
+        #[cfg(target_os = "macos")]
+        let _ = SET_BY_FONTCRAFT.load(Ordering::SeqCst);
+    }
+
+    fn port() -> String {
+        PORT.get().cloned().unwrap_or_else(|| std::env::var("DESIGNCRAFT_CONTROL_PORT").unwrap_or_else(|_| DEFAULT_PORT.into()))
+    }
+
+    /// DesignCraft's command-line tool, beside the app.
+    fn cli() -> Option<PathBuf> {
+        let home = crate::paths::home();
+        [PathBuf::from("/Applications/DesignCraft.app"), home.join("Applications/DesignCraft.app")]
+            .into_iter()
+            .map(|a| a.join("Contents/MacOS/designcraft-cli"))
+            .find(|p| p.exists())
+    }
+
+    fn step(command: &str, params: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "command": command, "params": params })
+    }
+
+    /// Runs these steps in the running DesignCraft, in order (off the main thread: it waits for
+    /// DesignCraft's answer, at most `CHANNEL_WAIT_S`).
+    pub fn run(steps: &[serde_json::Value]) -> Answer {
+        use std::io::Write;
+        use std::process::Stdio;
+        let Some(cli) = cli() else { return Answer::Unreachable };
+        let script: String = steps.iter().map(|s| format!("{s}\n")).collect();
+        let child = crate::paths::command(cli.to_string_lossy().as_ref())
+            .args(["script", "-", "--connect", &port()])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = child else { return Answer::Unreachable };
+        if let Some(mut input) = child.stdin.take() {
+            let _ = input.write_all(script.as_bytes());
+        }
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
+        });
+        let Ok(Ok(out)) = rx.recv_timeout(Duration::from_secs_f64(crate::mechanics::CHANNEL_WAIT_S)) else {
+            let _ = crate::paths::command("kill").arg(pid.to_string()).status();
+            return Answer::Unreachable;
+        };
+        // Not connected: designcraft-cli says so on its error output and writes no result.
+        let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else { return Answer::Unreachable };
+        let completed = v.get("completed").and_then(|c| c.as_u64()).unwrap_or(0) as usize;
+        if v.get("error").is_some() || completed < steps.len() {
+            return Answer::Refused;
+        }
+        Answer::Done(v.get("results").and_then(|r| r.as_array()).cloned().unwrap_or_default())
+    }
+
+    fn attrs(family: &str, style: Option<&str>) -> serde_json::Value {
+        let mut a = serde_json::json!({ "fontFamily": family });
+        if let Some(s) = style.filter(|s| !s.is_empty()) {
+            a["fontStyle"] = serde_json::Value::String(s.to_string());
+        }
+        serde_json::json!({ "attrs": a })
+    }
+
+    /// The font on the selected text, or on all the text of the selected text frames.
+    pub fn set_font(family: &str, style: Option<&str>) -> Answer {
+        run(&[step("type.char", attrs(family, style))])
+    }
+
+    /// DesignCraft reads the font folders again (a font just turned on shows in its font menu).
+    pub fn reload_fonts() -> bool {
+        matches!(run(&[step("font.reload", serde_json::json!({}))]), Answer::Done(_))
+    }
+
+    /// The glyph typed at the text cursor (replacing the selected text) and set in the font.
+    pub fn insert(text: &str, family: &str, style: Option<&str>) -> Answer {
+        let mut steps = vec![step("text.insert", serde_json::json!({ "text": text, "raw": true }))];
+        for _ in 0..text.chars().count() {
+            steps.push(step("text.move", serde_json::json!({ "dir": "left", "extend": true })));
+        }
+        steps.push(step("type.char", attrs(family, style)));
+        steps.push(step("text.move", serde_json::json!({ "dir": "right" })));
+        run(&steps)
+    }
+
+    /// The open documents' titles, the active one first; None without the channel.
+    pub fn documents() -> Option<Vec<String>> {
+        let Answer::Done(r) = run(&[step("document.list", serde_json::json!({}))]) else { return None };
+        let list = r.first()?.as_array()?.clone();
+        let mut titles: Vec<(bool, String)> = list
+            .iter()
+            .filter_map(|d| Some((d.get("active").and_then(|a| a.as_bool()).unwrap_or(false), d.get("title")?.as_str()?.to_string())))
+            .collect();
+        titles.sort_by_key(|(active, _)| !*active);
+        Some(titles.into_iter().map(|(_, t)| t).collect())
+    }
+
+    /// The families the active document uses that aren't installed.
+    pub fn missing_families() -> Option<Vec<String>> {
+        let Answer::Done(r) = run(&[step("font.list", serde_json::json!({}))]) else { return None };
+        let mut out: Vec<String> = Vec::new();
+        for f in r.first()?.as_array()? {
+            if f.get("missing").and_then(|m| m.as_bool()) == Some(true) {
+                if let Some(name) = f.get("family").and_then(|n| n.as_str()) {
+                    if !out.iter().any(|o| o == name) {
+                        out.push(name.to_string());
+                    }
+                }
+            }
+        }
+        Some(out)
+    }
+}
+
+/// PhotoCraft's control channel. PhotoCraft (ai.storyteller.photocraft) listens on 127.0.0.1 when it
+/// opens with PHOTOCRAFT_CONTROL_PORT set, and only answers a client that first sends its control
+/// token (64 hex digits, from PHOTOCRAFT_CONTROL_TOKEN or the file PHOTOCRAFT_CONTROL_TOKEN_FILE
+/// names). The talk is JSON lines `{"id", "method", "params"}`: `auth {token}` first, then
+/// `engine.execute {command, params}`, `session.list`… (photocraft-cli serve's protocol, tested
+/// headless). FontCraft keeps a token file of its own and sets both variables for the apps macOS opens
+/// from then on (`launchctl setenv`, kept for the login session), so a PhotoCraft opened while
+/// FontCraft runs takes fonts in the background, as Affinity does:
+/// - `type.setStyle {font, fontStyle}` on the selected type layers, all their text (size kept);
+///   with no type layer selected it answers "select a type layer";
+/// - `session.list` names the open documents (a font goes off when its document closes);
+/// - `type.resolveMissingFonts {}` lists the families the active document lacks (Missing Fonts).
+/// PhotoCraft runs once on a Mac (a second copy closes), so one opened before FontCraft keeps no
+/// channel until it is reopened; the routes of before are used for it meanwhile.
+pub(crate) mod photocraft {
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    pub const BUNDLE: &str = "ai.storyteller.photocraft";
+    /// The port FontCraft asks PhotoCraft to listen on, unless one is set already.
+    const DEFAULT_PORT: &str = "7981";
+    static PORT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    /// The variables FontCraft set itself (taken back when it quits).
+    static SET_PORT: AtomicBool = AtomicBool::new(false);
+    static SET_TOKEN_FILE: AtomicBool = AtomicBool::new(false);
+
+    pub use super::designcraft::Answer;
+
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn launchctl(args: &[&str]) -> Option<String> {
+        let out = crate::paths::command("launchctl").args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    /// FontCraft's own control token for PhotoCraft (64 hex digits, made once from the system's
+    /// random source, kept in FontCraft's data folder, readable only by the person).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn token_file() -> Option<std::path::PathBuf> {
+        let path = crate::paths::data_dir().join("photocraft-control-token");
+        let valid = |s: &str| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit());
+        // PhotoCraft refuses a token file others can read ("control token file is readable by
+        // group or others (mode 644); restrict it to its owner"): owner-only, every time.
+        let owner_only = |p: &std::path::Path| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
+            }
+            let _ = p;
+        };
+        if std::fs::read_to_string(&path).is_ok_and(|s| valid(s.trim())) {
+            owner_only(&path);
+            return Some(path);
+        }
+        let mut bytes = [0u8; 32];
+        use std::io::Read;
+        std::fs::File::open("/dev/urandom").ok()?.read_exact(&mut bytes).ok()?;
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let _ = std::fs::create_dir_all(path.parent()?);
+        std::fs::write(&path, &hex).ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        Some(path)
+    }
+
+    /// At FontCraft's start (macOS): PhotoCraft opened from now on listens for FontCraft. A port or
+    /// token the person (or another tool) already set is kept and used.
+    pub fn offer_channel() {
+        #[cfg(target_os = "macos")]
+        {
+            let get = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty()).or_else(|| launchctl(&["getenv", k]).filter(|v| !v.is_empty()));
+            let port = match get("PHOTOCRAFT_CONTROL_PORT") {
+                Some(p) => p,
+                None => {
+                    if launchctl(&["setenv", "PHOTOCRAFT_CONTROL_PORT", DEFAULT_PORT]).is_some() {
+                        SET_PORT.store(true, Ordering::SeqCst);
+                    }
+                    DEFAULT_PORT.to_string()
+                }
+            };
+            let _ = PORT.set(port);
+            let token = if let Some(t) = get("PHOTOCRAFT_CONTROL_TOKEN") {
+                Some(t)
+            } else if let Some(f) = get("PHOTOCRAFT_CONTROL_TOKEN_FILE") {
+                std::fs::read_to_string(f).ok().map(|s| s.trim().to_string())
+            } else {
+                token_file().and_then(|f| {
+                    if launchctl(&["setenv", "PHOTOCRAFT_CONTROL_TOKEN_FILE", &f.to_string_lossy()]).is_some() {
+                        SET_TOKEN_FILE.store(true, Ordering::SeqCst);
+                    }
+                    std::fs::read_to_string(f).ok().map(|s| s.trim().to_string())
+                })
+            };
+            if let Some(t) = token {
+                let _ = TOKEN.set(t);
+            }
+        }
+    }
+
+    /// When FontCraft quits: the variables stay for the rest of the login session (macOS forgets
+    /// them at logout), so a PhotoCraft reopened while FontCraft is closed or restarting still opens
+    /// its channel with FontCraft's token; taking them back left such a PhotoCraft without one (the
+    /// person: "lo hizo un par de veces pero ya no lo hace más").
+    pub fn withdraw_channel() {
+        #[cfg(target_os = "macos")]
+        let _ = (SET_PORT.load(Ordering::SeqCst), SET_TOKEN_FILE.load(Ordering::SeqCst));
+    }
+
+    /// Sends these requests (method, params) to the running PhotoCraft after its token, in order;
+    /// their results. Off the main thread: at most `CHANNEL_WAIT_S` for each answer.
+    pub fn talk(requests: &[(&str, serde_json::Value)]) -> Answer {
+        let (Some(port), Some(token)) = (PORT.get(), TOKEN.get()) else { return Answer::Unreachable };
+        let Ok(port) = port.trim().parse::<u16>() else { return Answer::Unreachable };
+        let wait = Duration::from_secs_f64(crate::mechanics::CHANNEL_WAIT_S);
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let Ok(stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)) else { return Answer::Unreachable };
+        let _ = stream.set_read_timeout(Some(wait));
+        let _ = stream.set_write_timeout(Some(wait));
+        let Ok(mut writer) = stream.try_clone() else { return Answer::Unreachable };
+        let mut reader = BufReader::new(stream);
+        let mut ask = |id: usize, method: &str, params: &serde_json::Value| -> Option<serde_json::Value> {
+            let line = serde_json::json!({ "id": id, "method": method, "params": params }).to_string();
+            writer.write_all(format!("{line}\n").as_bytes()).ok()?;
+            let mut answer = String::new();
+            reader.read_line(&mut answer).ok()?;
+            serde_json::from_str(answer.trim()).ok()
+        };
+        let Some(auth) = ask(0, "auth", &serde_json::json!({ "token": token })) else { return Answer::Unreachable };
+        if auth.get("ok").and_then(|o| o.as_bool()) != Some(true) {
+            return Answer::Unreachable;
+        }
+        let mut results = Vec::new();
+        for (i, (method, params)) in requests.iter().enumerate() {
+            let Some(a) = ask(i + 1, method, params) else { return Answer::Unreachable };
+            if a.get("ok").and_then(|o| o.as_bool()) != Some(true) {
+                return Answer::Refused;
+            }
+            results.push(a.get("result").cloned().unwrap_or(serde_json::Value::Null));
+        }
+        Answer::Done(results)
+    }
+
+    /// Developer check (`--test-photocraft-channel PORT TOKENFILE`, against `photocraft-cli serve
+    /// --port PORT --control-token-file TOKENFILE`): a document with a type layer, its font set the
+    /// way FontCraft sets it, the documents listed; prints what PhotoCraft answered.
+    pub fn selftest(port: &str, token_path: &str) {
+        let _ = PORT.set(port.to_string());
+        if let Ok(t) = std::fs::read_to_string(token_path) {
+            let _ = TOKEN.set(t.trim().to_string());
+        }
+        let setup = talk(&[
+            ("doc.new", serde_json::json!({ "width": 800, "height": 300, "name": "FontCraft check" })),
+            execute("type.create", serde_json::json!({ "x": 40, "y": 160, "text": "Ancizar", "font": "Helvetica", "size": 48 })),
+        ]);
+        println!("setup: {setup:?}");
+        println!("has Georgia: {:?}, has 12SaruYellowFog: {:?}", has_family("Georgia"), has_family("12SaruYellowFog"));
+        println!("set_font: {:?}", matches!(set_font("Georgia", Some("Regular")), Answer::Done(_)));
+        if let Answer::Done(r) = talk(&[execute("type.info", serde_json::json!({}))]) {
+            let runs = r.first().and_then(|i| i.get("runs")).cloned().unwrap_or_default();
+            let fonts: Vec<String> = runs.as_array().map(|a| a.iter().filter_map(|run| Some(format!("{} {}", run.get("style")?.get("font_family")?.as_str()?, run.get("style")?.get("font_style")?.as_str()?))).collect()).unwrap_or_default();
+            println!("type layer now: {fonts:?}");
+        }
+        println!("documents: {:?}", documents());
+        println!("missing: {:?}", missing_families());
+        let _ = talk(&[execute("layer.new.layer", serde_json::json!({}))]);
+        println!("with a pixel layer selected: {:?}", set_font("Georgia", None));
+    }
+
+    fn execute(command: &str, params: serde_json::Value) -> (&'static str, serde_json::Value) {
+        ("engine.execute", serde_json::json!({ "command": command, "params": params }))
+    }
+
+    /// Whether the running PhotoCraft has this family: PhotoCraft reads the installed fonts once,
+    /// when it opens (tested: a family registered after it started gives `type.fonts` no faces and
+    /// type.setStyle "font '…' is not installed; text may render using a fallback face"; a
+    /// PhotoCraft started after it lists it and sets it exactly). None without the channel.
+    pub fn has_family(family: &str) -> Option<bool> {
+        let Answer::Done(r) = talk(&[execute("type.fonts", serde_json::json!({ "family": family }))]) else { return None };
+        Some(r.first().and_then(|v| v.get("faces")).and_then(|f| f.as_array()).is_some_and(|f| !f.is_empty()))
+    }
+
+    /// The font on the selected type layers (all their text; size and the rest kept).
+    pub fn set_font(family: &str, style: Option<&str>) -> Answer {
+        let mut p = serde_json::json!({ "font": family });
+        if let Some(s) = style.filter(|s| !s.is_empty()) {
+            p["fontStyle"] = serde_json::Value::String(s.to_string());
+        }
+        talk(&[execute("type.setStyle", p)])
+    }
+
+    /// The open documents' names, the active one first; None without the channel. The desktop app
+    /// tells them in `ui.inspect`'s `session` (it has no `session.list`: "unknown method
+    /// `session.list`; did you mean `jobs.list` or `ui.menu.list`?", seen in the person's
+    /// PhotoCraft); photocraft-cli serve has `session.list`.
+    pub fn documents() -> Option<Vec<String>> {
+        let s = match talk(&[("ui.inspect", serde_json::json!({}))]) {
+            Answer::Done(r) => r.first()?.get("session")?.clone(),
+            Answer::Refused => match talk(&[("session.list", serde_json::json!({}))]) {
+                Answer::Done(r) => r.first()?.clone(),
+                _ => return None,
+            },
+            Answer::Unreachable => return None,
+        };
+        let s = &s;
+        let active = s.get("active").and_then(|a| a.as_u64());
+        let mut docs: Vec<(bool, String)> = s
+            .get("documents")?
+            .as_array()?
+            .iter()
+            .filter_map(|d| Some((d.get("index").and_then(|i| i.as_u64()) == active, d.get("name")?.as_str()?.to_string())))
+            .collect();
+        docs.sort_by_key(|(a, _)| !*a);
+        Some(docs.into_iter().map(|(_, n)| n).collect())
+    }
+
+    /// The families the active document uses that aren't installed.
+    pub fn missing_families() -> Option<Vec<String>> {
+        let Answer::Done(r) = talk(&[execute("type.resolveMissingFonts", serde_json::json!({}))]) else { return None };
+        let list = r.first()?.get("missing")?.as_array()?.clone();
+        let mut out: Vec<String> = Vec::new();
+        for m in list {
+            let name = m.as_str().map(String::from).or_else(|| m.get("family").and_then(|f| f.as_str()).map(String::from));
+            if let Some(n) = name.filter(|n| !out.contains(n)) {
+                out.push(n);
+            }
+        }
+        Some(out)
+    }
+}
+
+/// `text` in the font with this PostScript (or full) name at `size` points, as rich text written by
+/// the system's own RTF writer (NSAttributedString, the same RTF TextEdit puts on the clipboard).
+/// None when the font isn't available to the system yet or outside macOS.
+fn cocoa_rtf(text: &str, font: &str, size: Option<f64>) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        use objc2_foundation::{NSRange, NSString};
+        let run = || unsafe {
+            let name = NSString::from_str(font);
+            let f: *mut AnyObject = msg_send![class!(NSFont), fontWithName: &*name, size: size.unwrap_or(12.0)];
+            if f.is_null() {
+                return None;
+            }
+            let key = NSString::from_str("NSFont");
+            let attrs: *mut AnyObject = msg_send![class!(NSDictionary), dictionaryWithObject: f, forKey: &*key];
+            let s = NSString::from_str(text);
+            let a: *mut AnyObject = msg_send![class!(NSAttributedString), alloc];
+            let a: *mut AnyObject = msg_send![a, initWithString: &*s, attributes: attrs];
+            if a.is_null() {
+                return None;
+            }
+            let len: usize = msg_send![a, length];
+            let doc: *mut AnyObject = msg_send![class!(NSDictionary), dictionary];
+            let data: *mut AnyObject = msg_send![a, RTFFromRange: NSRange::new(0, len), documentAttributes: doc];
+            if data.is_null() {
+                return None;
+            }
+            let n: usize = msg_send![data, length];
+            let p: *const std::ffi::c_void = msg_send![data, bytes];
+            let p = p as *const u8;
+            if p.is_null() || n == 0 {
+                return None;
+            }
+            let rtf = String::from_utf8_lossy(std::slice::from_raw_parts(p, n)).to_string();
+            // Without a size the system writes 12 points; the app's own size is kept instead.
+            Some(if size.is_none() { rtf.replace("\\fs24 ", "") } else { rtf })
+        };
+        objc2::exception::catch(std::panic::AssertUnwindSafe(run)).ok().flatten()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (text, font, size);
+        None
+    }
+}
+
+/// Waits (up to `max`) until the system lists a font just turned on by this PostScript or full
+/// name, then a moment more, so the app has heard the system's "fonts changed" notice before the
+/// font is pasted: Affinity gave the text another font when the name arrived first.
+fn wait_font_listed(name: &str, max: Duration) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        let start = std::time::Instant::now();
+        while start.elapsed() < max {
+            let found = objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
+                let n = objc2_foundation::NSString::from_str(name);
+                let f: *mut AnyObject = msg_send![class!(NSFont), fontWithName: &*n, size: 12.0f64];
+                !f.is_null()
+            }))
+            .unwrap_or(false);
+            if found {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        std::thread::sleep(Duration::from_millis(700));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = name;
+        std::thread::sleep(max.min(Duration::from_millis(250)));
+    }
+}
+
+/// The text size the app copied, in RTF half points: the first \fsN of its RTF, else the first
+/// CSS font-size (px or pt) of its HTML.
+fn copied_size(rtf: Option<&str>, html: Option<&str>) -> Option<u32> {
+    if let Some(r) = rtf {
+        if let Some(p) = r.find("\\fs") {
+            let d: String = r[p + 3..].chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(v) = d.parse::<u32>() {
+                return Some(v);
+            }
+        }
+    }
+    let h = html?;
+    let p = h.find("font-size:")?;
+    let rest = h[p + 10..].trim_start();
+    let num: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let v: f32 = num.parse().ok()?;
+    let unit = &rest[num.len()..];
+    let pt = if unit.starts_with("px") { v * 0.75 } else { v };
+    Some((pt * 2.0).round() as u32)
 }
 
 /// Copied rich text with every font in its font table replaced by `font` (sizes, colours and the
@@ -1141,8 +1844,11 @@ pub fn retarget_rtf(rtf: &str, font: &str) -> Option<String> {
 
 /// Changes the selected text in the app to `font` (runs off the main thread: it waits for the app).
 /// How the last font change reached the app: 1 its own AppleScript, 2 VectorCraft's font search,
-/// 3 DesignCraft's command line, 4 copy → swap → paste. Glyph insertion uses it to know whether the
-/// app still has the glyph selected afterwards (a paste leaves the cursor after it).
+/// 3 DesignCraft's command line, 4 copy → swap → paste, 5 RightFont's notification (Affinity),
+/// 6 DesignCraft's control channel (type.char in the background), 7 PhotoCraft's control channel
+/// (type.setStyle in the background).
+/// Glyph insertion uses it to know whether the app still has the glyph selected afterwards (a paste
+/// leaves the cursor after it).
 static LAST_ROUTE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 fn route(r: u8) {
@@ -1150,16 +1856,26 @@ fn route(r: u8) {
 }
 
 fn apply_in_app(bundle: &str, kind: Option<Docs>, font: &str, script: Option<&str>) -> Result<Option<String>, bool> {
+    apply_in_app_exact(bundle, kind, font, script, None)
+}
+
+/// As `apply_in_app`; with `exact` (a glyph just typed and selected), the copy → swap → paste way
+/// pastes back exactly that text in the font at the copied size, never the app's own copied rich
+/// text or HTML (whose spaces and line breaks around the glyph came back with it: in Affinity the
+/// glyph went in with a space before it).
+fn apply_in_app_exact(bundle: &str, kind: Option<Docs>, font: &str, script: Option<&str>, exact: Option<&str>) -> Result<Option<String>, bool> {
     route(0);
+    // Affinity, RightFont's way: its notification names the font and Affinity sets it on whatever is
+    // selected (text being edited, or whole text boxes), at once, in the background. Nothing is
+    // copied or pasted, so no copy of the text can land in the document.
+    if exact.is_none() && takes_font_notice(bundle) {
+        route(5);
+        return if post_font_selected(font) { Ok(None) } else { Err(false) };
+    }
     if !trusted_or_ask() {
         return Err(true);
     }
     let _ = osascript(&format!("tell application id \"{bundle}\" to activate"));
-    // RightFont's paste template: activate, then "delay 0.1" (string 0x10028b813). Apps that take
-    // longer to come to the front (LibreOffice, ONLYOFFICE, Electron and Java apps) would get the
-    // copy keystroke while FontCraft is still in front, so FontCraft waits until the app is the
-    // frontmost one (up to 2 s) and gives its window a moment to take the keyboard.
-    std::thread::sleep(Duration::from_millis(100));
     wait_front(bundle);
     let doc = kind.and_then(|k| osascript(&front_doc_script(bundle, k)));
     // Apps RightFont talks to directly get its own AppleScript (strings 0x10028b730–0x10028d4fa).
@@ -1210,15 +1926,12 @@ fn apply_in_app(bundle: &str, kind: Option<Docs>, font: &str, script: Option<&st
     let marker = "\u{2063}fontcraft\u{2063}";
     pb_set(None, marker);
     keystroke(bundle, "c");
-    // RightFont waits 0.2 s after copying (string 0x10028b730); slower apps (LibreOffice,
-    // ONLYOFFICE) put the copy on the clipboard later, so FontCraft waits until it is there, up to 2 s.
     let mut waited = 0;
     while pb_get().1 == marker && waited < 2000 {
-        std::thread::sleep(Duration::from_millis(100));
-        waited += 100;
+        std::thread::sleep(Duration::from_millis(20));
+        waited += 20;
     }
-    // A moment more for the rich versions, which some apps add after the plain text.
-    std::thread::sleep(Duration::from_millis(150));
+    std::thread::sleep(Duration::from_millis(40));
     let (rtf, plain) = pb_get();
     let html = pb_get_html();
     let rtf = rtf.filter(|r| r.starts_with("{\\rtf"));
@@ -1226,9 +1939,34 @@ fn apply_in_app(bundle: &str, kind: Option<Docs>, font: &str, script: Option<&st
         pb_set_all(saved_rtf.as_deref(), saved_html.as_deref(), &saved_text);
         return Err(false);
     }
+    // A whole object was copied, not text (an app copies a selected shape or box as SVG markup in its
+    // plain text): pasting it back would add a copy of the object, so nothing is pasted, the
+    // clipboard comes back, and the person is asked to select the text. (Affinity never gets here:
+    // it takes the font from RightFont's notification above.)
+    if looks_like_markup(&plain) && rtf.is_none() {
+        pb_set_all(saved_rtf.as_deref(), saved_html.as_deref(), &saved_text);
+        return Err(false);
+    }
+    // CorelDRAW: a whole object was copied (no rich text): nothing is pasted, so no copy of it lands
+    // in the document; the person is asked to select the text with the Text tool.
+    if copy_must_be_rich_text(bundle) && rtf.is_none() {
+        pb_set_all(saved_rtf.as_deref(), saved_html.as_deref(), &saved_text);
+        return Err(false);
+    }
     // The text keeps its size: the app's own rich text is changed (only its fonts). An RTF without
-    // sizes (ONLYOFFICE, browsers) loses to the app's HTML, which keeps them.
-    let rtf_has_size = rtf.as_deref().is_some_and(|r| r.contains("\\fs"));
+    // sizes (ONLYOFFICE, browsers) loses to the app's HTML, which keeps them; apps that name fonts
+    // by PostScript name in rich text only (Affinity) always get RTF, since CSS names families.
+    let rtf_only = bundle_prefers_rtf(bundle);
+    let rtf_has_size = rtf_only || rtf.as_deref().is_some_and(|r| r.contains("\\fs"));
+    if let Some(text) = exact {
+        let size = copied_size(rtf.as_deref(), html.as_deref());
+        let rich = cocoa_rtf(text, font, size.map(|h| h as f64 / 2.0)).unwrap_or_else(|| rtf_exact(text, font, size));
+        pb_set_all(Some(&rich), None, text);
+        keystroke(bundle, "v");
+        std::thread::sleep(Duration::from_millis(120));
+        pb_set_all(saved_rtf.as_deref(), saved_html.as_deref(), &saved_text);
+        return Ok(doc);
+    }
     match (&rtf, &html) {
         (_, Some(h)) if !rtf_has_size => {
             let styled = retarget_html(h, font);
@@ -1241,9 +1979,7 @@ fn apply_in_app(bundle: &str, kind: Option<Docs>, font: &str, script: Option<&st
         _ => pb_set_all(Some(&rtf_for(&plain, font)), None, &plain),
     }
     keystroke(bundle, "v");
-    // The app reads the clipboard when it pastes, which can take a moment: the person's clipboard
-    // comes back only after that.
-    std::thread::sleep(Duration::from_millis(1200));
+    std::thread::sleep(Duration::from_millis(120));
     pb_set_all(saved_rtf.as_deref(), saved_html.as_deref(), &saved_text);
     Ok(doc)
 }
@@ -1367,7 +2103,7 @@ fn insert_in_app(bundle: &str, kind: Option<Docs>, text: &str, font: &str, scrip
             "tell application \"System Events\" to repeat {n} times\nkey code 123 using shift down\nend repeat"
         ));
         std::thread::sleep(Duration::from_millis(150));
-        let _ = apply_in_app(bundle, kind, font, script);
+        let _ = apply_in_app_exact(bundle, kind, font, script, Some(text));
         std::thread::sleep(Duration::from_millis(150));
     }
     // The cursor ends right after the glyph, with nothing added around it.
@@ -1481,6 +2217,20 @@ fn settle_after_insert(before: Option<Caret>, n: usize, set_font: bool) {
     }
 }
 
+static APPLY_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+struct InFlightGuard;
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        Self::reset();
+    }
+}
+impl InFlightGuard {
+    fn reset() {
+        APPLY_IN_FLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl App {
     /// Finds the apps once and starts the watcher.
     pub(crate) fn autoact_start(&mut self) {
@@ -1495,10 +2245,17 @@ impl App {
         crate::fontreq::set_substitutes(self.missing.replaced.clone());
         if self.screenshot.is_none() {
             crate::fontreq::start();
+            // DesignCraft opened from now on listens for FontCraft (its control channel).
+            std::thread::spawn(designcraft::offer_channel);
+            std::thread::spawn(photocraft::offer_channel);
         }
         let watch = self.autoact.watch.clone();
         let shared = self.autoact.shared_apps.clone();
         let mut round = 0u32;
+        let mut designcraft_seen: HashSet<String> = HashSet::new();
+        let mut designcraft_docs: Option<Vec<String>> = None;
+        let mut photocraft_seen: HashSet<String> = HashSet::new();
+        let mut photocraft_docs: Option<Vec<String>> = None;
         std::thread::spawn(move || loop {
             let apps: Vec<(String, PathBuf, Option<Docs>, Vec<String>)> = shared.lock().unwrap().clone();
             let keys: Vec<(String, Vec<String>)> = apps.iter().map(|a| (a.0.clone(), a.3.clone())).collect();
@@ -1506,6 +2263,8 @@ impl App {
             let front = front_bundle();
             let want: Vec<String> = watch.lock().unwrap().want_docs.iter().cloned().collect();
             let mut docs = HashMap::new();
+            let mut renamed: Vec<(String, String)> = Vec::new();
+            let mut photocraft_renamed: Vec<(String, String)> = Vec::new();
             for b in want {
                 if !running.contains(&b) {
                     continue;
@@ -1513,6 +2272,35 @@ impl App {
                 if let Some((_, _, Some(kind), _)) = apps.iter().find(|a| a.0 == b) {
                     if let Some(list) = osascript(&doc_list_script(&b, *kind)) {
                         docs.insert(b.clone(), list.split(", ").map(String::from).collect());
+                    }
+                } else if b == photocraft::BUNDLE {
+                    // PhotoCraft: its open documents, from its channel; a renamed one (saved under
+                    // a name) keeps its fonts.
+                    if let Some(list) = photocraft::documents() {
+                        if let Some(before) = &photocraft_docs {
+                            let gone: Vec<&String> = before.iter().filter(|t| !list.contains(t)).collect();
+                            let new: Vec<&String> = list.iter().filter(|t| !before.contains(t)).collect();
+                            if before.len() == list.len() && gone.len() == 1 && new.len() == 1 {
+                                photocraft_renamed.push((gone[0].clone(), new[0].clone()));
+                            }
+                        }
+                        photocraft_docs = Some(list.clone());
+                        docs.insert(b.clone(), list);
+                    }
+                } else if b == designcraft::BUNDLE {
+                    // DesignCraft: its open documents, from its channel (its window isn't in
+                    // macOS accessibility). Same count with one title swapped: a document saved
+                    // under a new name, not one closed.
+                    if let Some(list) = designcraft::documents() {
+                        if let Some(before) = &designcraft_docs {
+                            let gone: Vec<&String> = before.iter().filter(|t| !list.contains(t)).collect();
+                            let new: Vec<&String> = list.iter().filter(|t| !before.contains(t)).collect();
+                            if before.len() == list.len() && gone.len() == 1 && new.len() == 1 {
+                                renamed.push((gone[0].clone(), new[0].clone()));
+                            }
+                        }
+                        designcraft_docs = Some(list.clone());
+                        docs.insert(b.clone(), list);
                     }
                 } else if let Some(list) = window_documents(&b) {
                     // Any other app: the documents of its open windows (their file names).
@@ -1541,9 +2329,34 @@ impl App {
                 }
                 w.running = running;
                 w.docs = docs;
+                // Together with the documents they were seen in (never a rename without its list).
+                w.designcraft_renames.extend(renamed);
+                w.photocraft_renames.extend(photocraft_renamed);
             }
             // Every third round (about 4.5 s): the document open in front, for Missing Fonts.
             round += 1;
+            if round % 3 == 0 && watch.lock().unwrap().running.contains(designcraft::BUNDLE) {
+                // DesignCraft: a document it shows for the first time is asked which of its fonts
+                // aren't installed (font.list), once per title; without its channel, nothing.
+                if let Some(active) = designcraft::documents().and_then(|d| d.into_iter().next()) {
+                    if designcraft_seen.insert(active.clone()) {
+                        if let Some(families) = designcraft::missing_families().filter(|f| !f.is_empty()) {
+                            watch.lock().unwrap().designcraft_missing.push((active, families));
+                        }
+                    }
+                }
+            }
+            if round % 3 == 0 && watch.lock().unwrap().running.contains(photocraft::BUNDLE) {
+                // PhotoCraft: a document it shows for the first time is asked which fonts it lacks
+                // (type.resolveMissingFonts), once per name; without its channel, nothing.
+                if let Some(active) = photocraft::documents().and_then(|d| d.into_iter().next()) {
+                    if photocraft_seen.insert(active.clone()) {
+                        if let Some(families) = photocraft::missing_families().filter(|f| !f.is_empty()) {
+                            watch.lock().unwrap().photocraft_missing.push((active, families));
+                        }
+                    }
+                }
+            }
             if round % 3 == 0 {
                 let front = watch.lock().unwrap().front.clone();
                 let doc = front.and_then(|b| {
@@ -1653,6 +2466,9 @@ impl App {
 
     /// The selected font, used in the target app's selected text.
     pub(crate) fn apply_to_app(&mut self, app: usize, face: usize) {
+        if APPLY_IN_FLIGHT.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_err() {
+            return;
+        }
         let def = self.autoact.apps[app].def;
         let files = self.files_for(face);
         let turned = self.auto_on(&files);
@@ -1668,6 +2484,7 @@ impl App {
             let family = self.lib.faces[face].family.clone();
             let (exes, bundle) = (def.win, def.bundle.to_string());
             std::thread::spawn(move || {
+                let _guard = InFlightGuard;
                 std::thread::sleep(Duration::from_millis(400));
                 let outcome = match crate::winauto::apply_font(exes, &family) {
                     Ok(true) => Outcome::Applied(name, None),
@@ -1679,13 +2496,67 @@ impl App {
             return;
         }
         if !cfg!(target_os = "macos") || def.how() == How::Activate {
+            InFlightGuard::reset();
             let family = self.lib.faces[face].family.clone();
             pending.lock().unwrap().push((turned, def.bundle.to_string(), Outcome::Activated(name, family)));
             return;
         }
         let (bundle, kind, script) = (def.bundle.to_string(), def.docs, def.script);
         let reload = def.reload_menu().filter(|_| !turned.is_empty());
+        let just_on = !turned.is_empty();
+        // DesignCraft, through its control channel: the exact face (family and style), in the
+        // background, FontCraft staying in front; a font just turned on is read first (font.reload).
+        let channel = (bundle == designcraft::BUNDLE || bundle == photocraft::BUNDLE).then(|| (self.lib.faces[face].family.clone(), self.lib.faces[face].style.clone()));
         std::thread::spawn(move || {
+            let _guard = InFlightGuard;
+            if let Some((family, style)) = &channel {
+                // PhotoCraft (its channel): type.setStyle on the selected type layers. A font just
+                // turned on is waited for until the system lists it (PhotoCraft asks CoreText).
+                if bundle == photocraft::BUNDLE {
+                    if just_on {
+                        wait_font_listed(&font, Duration::from_secs(3));
+                    }
+                    // A family PhotoCraft didn't read when it opened (a font FontCraft just turned
+                    // on): nothing is set, so the layer doesn't take a font PhotoCraft draws with a
+                    // stand-in; the person is told to reopen PhotoCraft (the font stays on for that).
+                    if photocraft::has_family(family) == Some(false) {
+                        pending.lock().unwrap().push((turned, bundle, Outcome::Reopen(name)));
+                        return;
+                    }
+                    match photocraft::set_font(family, Some(style)) {
+                        photocraft::Answer::Done(_) => {
+                            route(7);
+                            let doc = photocraft::documents().and_then(|d| d.into_iter().next());
+                            pending.lock().unwrap().push((turned, bundle, Outcome::Applied(name, doc)));
+                            return;
+                        }
+                        photocraft::Answer::Refused => {
+                            pending.lock().unwrap().push((turned, bundle, Outcome::NoSelection(name)));
+                            return;
+                        }
+                        photocraft::Answer::Unreachable => {}
+                    }
+                }
+            }
+            if let Some((family, style)) = channel.as_ref().filter(|_| bundle == designcraft::BUNDLE) {
+                if just_on {
+                    designcraft::reload_fonts();
+                }
+                match designcraft::set_font(family, Some(style)) {
+                    designcraft::Answer::Done(_) => {
+                        route(6);
+                        let doc = designcraft::documents().and_then(|d| d.into_iter().next());
+                        pending.lock().unwrap().push((turned, bundle, Outcome::Applied(name, doc)));
+                        return;
+                    }
+                    designcraft::Answer::Refused => {
+                        pending.lock().unwrap().push((turned, bundle, Outcome::NoSelection(name)));
+                        return;
+                    }
+                    // Opened before FontCraft (no channel): the way of before.
+                    designcraft::Answer::Unreachable => {}
+                }
+            }
             // Apps that read fonts only when they open but can read them again (VectorCraft,
             // DesignCraft) do so first, so the font just turned on is in their list.
             if let Some(names) = reload {
@@ -1693,8 +2564,10 @@ impl App {
                 reload_fonts_menu(&bundle, names);
                 std::thread::sleep(Duration::from_millis(800));
             }
-            // Give apps a moment to see a newly turned-on font.
-            std::thread::sleep(Duration::from_millis(250));
+            // A font just turned on: wait until the system lists it and the app has heard so.
+            if just_on {
+                wait_font_listed(&font, Duration::from_secs(3));
+            }
             let outcome = match apply_in_app(&bundle, kind, &font, script) {
                 Ok(doc) => Outcome::Applied(name, doc),
                 Err(true) => Outcome::NeedsAccess,
@@ -1762,8 +2635,30 @@ impl App {
         }
         let (bundle, kind, script) = (def.bundle.to_string(), def.docs, def.script);
         let set_font = def.how() != How::Activate;
+        let just_on = !turned.is_empty();
+        // DesignCraft, through its control channel: typed at its text cursor and set in the face,
+        // in the background (nothing copied, no keystrokes).
+        let channel = (bundle == designcraft::BUNDLE).then(|| (self.lib.faces[face].family.clone(), self.lib.faces[face].style.clone()));
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(250));
+            if let Some((family, style)) = &channel {
+                if just_on {
+                    designcraft::reload_fonts();
+                }
+                let outcome = match designcraft::insert(&ch.to_string(), family, Some(style)) {
+                    designcraft::Answer::Done(_) => Some(Outcome::Inserted(name.clone())),
+                    designcraft::Answer::Refused => Some(Outcome::NoSelection(name.clone())),
+                    designcraft::Answer::Unreachable => None,
+                };
+                if let Some(outcome) = outcome {
+                    pending.lock().unwrap().push((turned, bundle, outcome));
+                    return;
+                }
+            }
+            if just_on {
+                wait_font_listed(&font, Duration::from_secs(3));
+            } else {
+                std::thread::sleep(Duration::from_millis(250));
+            }
             let outcome = match insert_in_app(&bundle, kind, &ch.to_string(), &font, script, set_font) {
                 Ok(_) => Outcome::Inserted(name),
                 Err(true) => Outcome::NeedsAccess,
@@ -1787,14 +2682,13 @@ impl App {
             // name (macOS AXDocument), so the font goes off when that document closes.
             if doc.is_none() && !files.is_empty() && cfg!(target_os = "macos") {
                 let front = self.autoact.front_document().filter(|(_, b)| b == &bundle).map(|(p, _)| p);
-                let front = front.or_else(|| front_document_of(&bundle, &[]));
                 doc = front.and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
             }
             if !files.is_empty() {
                 if doc.is_some() {
                     self.autoact.watch.lock().unwrap().want_docs.insert(bundle.clone());
                 }
-                self.autoact.records.push(Record { files, bundle, doc });
+                self.autoact.records.push(Record { files, bundle, doc, gone_since: None });
             }
             let silent = self.settings.silent;
             self.notice = match outcome {
@@ -1812,18 +2706,10 @@ impl App {
                 _ => None,
             };
         }
-        // Fonts other apps asked the system for (macOS): turned on for them, or missing.
+        // Fonts other apps asked the system for (macOS): the Missing Fonts window asks the person.
         for a in crate::fontreq::take_answers() {
             match a {
-                crate::fontreq::Answer::Activated(files, bundle, app, font) => {
-                    if !files.is_empty() {
-                        self.autoact.records.push(Record { files, bundle, doc: None });
-                    }
-                    if !self.settings.silent {
-                        self.notice = Some(t(K::ActivatedFor).replace("{app}", &app).replace("{font}", &font));
-                    }
-                }
-                crate::fontreq::Answer::Missing(font, app) => self.add_missing(font, app),
+                crate::fontreq::Answer::Requested(font, bundle, app) => self.add_requested(font, bundle, app),
             }
         }
         if !self.autoact.records.is_empty() {
@@ -1835,15 +2721,41 @@ impl App {
             (w.running.clone(), w.docs.clone())
         };
         let watched: HashSet<&str> = self.autoact.apps.iter().map(|a| a.def.bundle).collect();
+        let (renames, photo_renames): (Vec<(String, String)>, Vec<(String, String)>) = {
+            let mut w = self.autoact.watch.lock().unwrap();
+            (std::mem::take(&mut w.designcraft_renames), std::mem::take(&mut w.photocraft_renames))
+        };
+        for (old, new) in renames {
+            for r in self.autoact.records.iter_mut().filter(|r| r.bundle == designcraft::BUNDLE && r.doc.as_deref() == Some(old.as_str())) {
+                r.doc = Some(new.clone());
+            }
+        }
+        for (old, new) in photo_renames {
+            for r in self.autoact.records.iter_mut().filter(|r| r.bundle == photocraft::BUNDLE && r.doc.as_deref() == Some(old.as_str())) {
+                r.doc = Some(new.clone());
+            }
+        }
         let mut keep = Vec::new();
         let mut off: Vec<PathBuf> = Vec::new();
-        for r in std::mem::take(&mut self.autoact.records) {
+        for mut r in std::mem::take(&mut self.autoact.records) {
             // Apps outside FontCraft's list (fonts they asked the system for) are checked directly.
             let app_gone = if watched.contains(r.bundle.as_str()) { !running.contains(&r.bundle) } else { !app_running(&r.bundle) };
             let doc_gone = match (&r.doc, docs.get(&r.bundle)) {
                 (Some(d), Some(list)) => !list.contains(d),
                 _ => false,
             };
+            // An app that reads the installed fonts only when it opens (TraceDraw) lists a font
+            // turned on while it was open only after it is reopened: its fonts stay a moment after
+            // it closes, so reopening it finds them; closed for longer, they go.
+            if !app_gone {
+                r.gone_since = None;
+            } else if !doc_gone && reads_fonts_at_start(&r.bundle) {
+                let since = *r.gone_since.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed().as_secs_f64() < crate::mechanics::REOPEN_GRACE_S {
+                    keep.push(r);
+                    continue;
+                }
+            }
             if app_gone || doc_gone {
                 off.extend(r.files);
             } else {
@@ -1894,6 +2806,11 @@ impl App {
                 std::thread::spawn(move || {
                     // A moment for the system to finish registering the font.
                     std::thread::sleep(Duration::from_millis(300));
+                    // DesignCraft with its channel: font.reload, in the background.
+                    if bundle == designcraft::BUNDLE && designcraft::reload_fonts() {
+                        pending.lock().unwrap().push((Vec::new(), bundle, Outcome::Refreshed(name)));
+                        return;
+                    }
                     let outcome = if !trusted() {
                         Outcome::Reopen(name)
                     } else if reload_fonts_menu(&bundle, names) {
@@ -1919,6 +2836,8 @@ impl App {
 
     /// When FontCraft quits: turn off auto- and/or manually activated fonts, as the options say.
     pub(crate) fn autoact_quit(&mut self) {
+        designcraft::withdraw_channel();
+        photocraft::withdraw_channel();
         // Fonts activated temporarily always go off when FontCraft quits (RightFont's
         // deactivateTemporarilyActivatedFonts, 0x100072ea0), unless also switched on for good.
         for p in std::mem::take(&mut self.temp_active) {
@@ -1947,6 +2866,17 @@ impl App {
         }
     }
 
+    /// Brings the target application to the front at once. macOS: the window server is asked
+    /// directly (background::activate_app), never AppleScript on this thread: FontCraft answers the
+    /// apps' font requests on its main run loop (fontreq.rs), so waiting here for an app that was
+    /// itself waiting for a font left both stuck.
+    pub fn activate_target_app(bundle: &str) {
+        if bundle.is_empty() {
+            return;
+        }
+        crate::background::activate_app(bundle);
+    }
+
     /// The toolbar button with the target app's icon: click to use the selected font there;
     /// drop a glyph on it to insert the glyph.
     pub(crate) fn target_button(&mut self, ui: &mut egui::Ui) {
@@ -1972,6 +2902,8 @@ impl App {
         let name = self.autoact.apps[app].def.name;
         let tip = i18n::tr(lang, K::UseIn).replace("{app}", name);
         if resp.on_hover_text(tip).clicked() {
+            // The app comes to the front first, at once; the font follows on its own thread.
+            Self::activate_target_app(self.autoact.apps[app].def.bundle);
             if let Some(face) = face {
                 self.apply_to_app(app, face);
             }
@@ -2207,9 +3139,69 @@ mod tests {
     }
 
     #[test]
+    fn object_markup_is_not_text() {
+        assert!(looks_like_markup("<?xml version=\"1.0\"?>\n<!DOCTYPE svg PUBLIC>\n<svg width=\"1\"></svg>"));
+        assert!(!looks_like_markup("Ancizar"));
+    }
+
+    /// The glyph's rich text, read back by the system, is the glyph alone (no space or line).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn glyph_rich_text_is_exact() {
+        let rtf = cocoa_rtf("€", "Helvetica", Some(24.0)).expect("rtf");
+        assert!(rtf.contains("Helvetica") && rtf.contains("\\fs48"), "{rtf}");
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        unsafe {
+            let data = objc2_foundation::NSData::with_bytes(rtf.as_bytes());
+            let a: *mut AnyObject = msg_send![class!(NSAttributedString), alloc];
+            let a: *mut AnyObject = msg_send![a, initWithRTF: &*data, documentAttributes: std::ptr::null_mut::<*mut AnyObject>()];
+            let s: *mut AnyObject = msg_send![a, string];
+            let c: *const std::os::raw::c_char = msg_send![s, UTF8String];
+            assert_eq!(std::ffi::CStr::from_ptr(c).to_str().unwrap(), "€");
+        }
+    }
+
+    #[test]
     fn plain_text_and_non_ascii() {
         let out = rtf_for("Ñandú {1}\n€", "Lobster");
         assert!(out.contains("\\u209?") && out.contains("\\{1\\}") && out.contains("\\par") && out.contains("\\u8364?"));
+    }
+
+    /// Which apps get the font through RightFont's notification: every Affinity, nothing else.
+    #[test]
+    fn affinity_takes_the_notice() {
+        for b in ["com.canva.affinity", "com.seriflabs.affinitydesigner", "com.seriflabs.affinitydesigner2", "com.seriflabs.affinityphoto2", "com.seriflabs.affinitypublisher2.beta"] {
+            assert!(takes_font_notice(b), "{b}");
+        }
+        for b in ["com.apple.iWork.Pages", "com.adobe.illustrator", "ai.storyteller.vectorcraft", "com.canva.CanvaDesktop", "win.affinity"] {
+            assert!(!takes_font_notice(b), "{b}");
+        }
+        assert_eq!(FONT_SELECTED_NOTICE, "com.marklyapp.RightFont.FontSelectedNotification");
+    }
+
+    /// The distributed notification goes out (a test name, never Affinity's: a running Affinity
+    /// would apply it to its selection). FONTCRAFT_NOTICE_TEST names it and its font.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn distributed_notice_goes_out() {
+        let name = std::env::var("FONTCRAFT_NOTICE_TEST").unwrap_or_else(|_| "app.fontcraft.test.FontSelected".into());
+        assert_ne!(name, FONT_SELECTED_NOTICE);
+        assert!(post_distributed(&name, "Lobster-Regular"));
+    }
+
+    #[test]
+    fn supported_apps_filter() {
+        assert!(is_supported_app("com.apple.iWork.Pages", "Pages"));
+        assert!(is_supported_app("com.adobe.illustrator", "Adobe Illustrator"));
+        assert!(is_supported_app("com.seriflabs.affinitydesigner2", "Affinity Designer 2"));
+        assert!(is_supported_app("ai.storyteller.vectorcraft", "VectorCraft"));
+        assert!(!is_supported_app("net.whatsapp.WhatsApp", "WhatsApp"));
+        assert!(!is_supported_app("", "WhatsApp"));
+        assert!(!is_supported_app("org.telegram.desktop", "Telegram"));
+        assert!(!is_supported_app("com.tinyspeck.slackmacgap", "Slack"));
+        assert!(!is_supported_app("io.tangencylabs.solidcraft", "SolidCraft"));
+        assert!(!is_supported_app("ai.storyteller.texturecraft", "TextureCraft"));
     }
 }
 

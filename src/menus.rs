@@ -58,6 +58,10 @@ pub enum MenuAction {
     /// Copy files into a new folder named after the font, in a place the person picks.
     Export(String, Vec<PathBuf>),
     Reveal(PathBuf),
+    CharInfo(usize, u16),
+    Copy(String),
+    MarkChar(char),
+    FindSimilar(usize, u16, char),
 }
 
 /// Lists of one library shown in the right-click menu; a library with more is picked from a window.
@@ -354,6 +358,70 @@ impl App {
         (v, acts)
     }
 
+    /// The right-click native menu of a glyph on the Glyphs page.
+    pub(crate) fn glyph_menu_native(&self, face: usize, gid: u16) -> (Vec<NItem>, HashMap<String, MenuAction>) {
+        let lang = self.settings.lang;
+        let t = move |k: K| i18n::tr(lang, k);
+        let ch = self.glyph_char(gid);
+        let c = ch.map(|c| c.to_string()).unwrap_or_default();
+        let mut acts = HashMap::new();
+        let mut items = Vec::new();
+
+        acts.insert("char_info".to_string(), MenuAction::CharInfo(face, gid));
+        items.push(NItem::Item {
+            id: "char_info".into(),
+            label: t(K::CharInfo).into(),
+            enabled: true,
+            icon: None,
+        });
+        items.push(NItem::Sep);
+
+        let copies: [(&str, String, Option<String>); 4] = [
+            ("copy_char", t(K::CopyChar).replace("{c}", &c), ch.map(|c| c.to_string())),
+            ("copy_html", t(K::CopyHtml).replace("{v}", &ch.map(crate::glyphtools::html_of).unwrap_or_default()), ch.map(crate::glyphtools::html_of)),
+            ("copy_dec", t(K::CopyDec).replace("{v}", &ch.map(|c| (c as u32).to_string()).unwrap_or_default()), ch.map(|c| (c as u32).to_string())),
+            ("copy_hex", t(K::CopyHex).replace("{v}", &ch.map(crate::glyphtools::hex_of).unwrap_or_default()), ch.map(crate::glyphtools::hex_of)),
+        ];
+        for (id, label, value) in copies {
+            let enabled = value.is_some();
+            if let Some(v) = value {
+                acts.insert(id.to_string(), MenuAction::Copy(v));
+            }
+            items.push(NItem::Item {
+                id: id.into(),
+                label,
+                enabled,
+                icon: None,
+            });
+        }
+        items.push(NItem::Sep);
+
+        let marked = ch.is_some() && self.mark_char == ch;
+        let mark_label = if marked { t(K::UnmarkFonts) } else { t(K::MarkFonts) }.replace("{c}", &c);
+        if let Some(char_val) = ch {
+            acts.insert("mark".to_string(), MenuAction::MarkChar(char_val));
+        }
+        items.push(NItem::Item {
+            id: "mark".into(),
+            label: mark_label,
+            enabled: ch.is_some(),
+            icon: None,
+        });
+        items.push(NItem::Sep);
+
+        if let Some(char_val) = ch {
+            acts.insert("similar".to_string(), MenuAction::FindSimilar(face, gid, char_val));
+        }
+        items.push(NItem::Item {
+            id: "similar".into(),
+            label: t(K::FindSimilar).into(),
+            enabled: ch.is_some(),
+            icon: None,
+        });
+
+        (items, acts)
+    }
+
     /// Opens a menu as the system's own when the system offers one; true if it did (its answer then
     /// arrives through `native_menu_tick`).
     pub(crate) fn open_native_menu(&mut self, items: Vec<NItem>, acts: HashMap<String, MenuAction>) -> bool {
@@ -581,7 +649,15 @@ impl App {
                 // RightFont: an Open panel for a folder, "Select the destination for the exported
                 // font files." (0x100021294); the files are copied into a folder named after the font,
                 // made with its parents (-[RFFontService exportFonts:toLocation:], 0x10007e218).
-                #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
+                #[cfg(target_os = "macos")]
+                {
+                    crate::fcl::pick_folder_or_library_async(None, move |dir_opt| {
+                        if let Some(dir) = dir_opt {
+                            let _ = crate::fcl::export_fonts(&dir, &name, &files);
+                        }
+                    });
+                }
+                #[cfg(all(not(target_os = "macos"), not(target_os = "android"), not(target_os = "ios")))]
                 if let Some(dir) = rfd::FileDialog::new().set_title(t(K::ExportPrompt)).pick_folder() {
                     self.notice = Some(match crate::fcl::export_fonts(&dir, &name, &files) {
                         Ok((n, to)) => t(K::ExportedN).replace("{n}", &n.to_string()).replace("{dir}", &to.display().to_string()),
@@ -596,6 +672,20 @@ impl App {
                 self.import_dlg = Some(ImportDlg::into_target(lib, sub));
             }
             MenuAction::Confirm(c) => self.confirm = Some(c),
+            MenuAction::CharInfo(face, gid) => {
+                self.char_info = Some((face, gid));
+            }
+            MenuAction::Copy(v) => {
+                self.notice = Some(t(K::Copied).replace("{v}", &v));
+                self.clip = Some(v);
+            }
+            MenuAction::MarkChar(c) => {
+                self.mark_char = if self.mark_char == Some(c) { None } else { Some(c) };
+                self.mark_cache.clear();
+            }
+            MenuAction::FindSimilar(face, gid, c) => {
+                self.similar = crate::glyphtools::start_similar(self, face, gid, c);
+            }
         }
     }
 

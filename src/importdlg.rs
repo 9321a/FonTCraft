@@ -103,10 +103,10 @@ impl App {
                                 let l = &libs[i];
                                 let top = if kind == LibKind::Fcl { "library" } else { "folder" };
                                 let mut sub = vec![NItem::Item { id: format!("{i}"), label: t(K::RootLevel).into(), enabled: true, icon: Some(MIcon::line(top)) }];
-                                if kind == LibKind::Folder && !l.sets.is_empty() {
+                                if !l.sets.is_empty() {
                                     sub.push(NItem::Sep);
                                     for (si, set) in l.sets.iter().enumerate() {
-                                        sub.push(NItem::Item { id: format!("{i}.{si}"), label: format!("{}{}", "   ".repeat(set.depth.min(6)), set.name), enabled: true, icon: Some(MIcon::line("set")) });
+                                        sub.push(NItem::Item { id: format!("{i}.{si}"), label: format!("{}{}", "   ".repeat(set.depth.min(6)), set.name), enabled: true, icon: Some(MIcon::line(if kind == LibKind::Fcl { "library" } else { "set" })) });
                                     }
                                 }
                                 items.push(NItem::Sub { label: l.name.clone(), icon: Some(MIcon::line(top)), items: sub });

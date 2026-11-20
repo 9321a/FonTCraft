@@ -59,6 +59,10 @@ mod imp {
     }
 
     pub fn available() -> bool {
+        // TEMP-TEST-RCLICK
+        if std::env::var("FONTCRAFT_TEST_NO_NATIVE_MENU").is_ok() {
+            return false;
+        }
         WINDOW.load(std::sync::atomic::Ordering::Relaxed) != 0
     }
 
@@ -142,9 +146,38 @@ mod imp {
             let _ = menu.append(i);
         });
         // The menu opens at the pointer, like any context menu of the system.
+        // TEMP-TEST-RCLICK: closes the menu by itself after a moment (crash test only).
+        #[cfg(target_os = "macos")]
+        if let Ok(ms) = std::env::var("FONTCRAFT_TEST_MENU_CANCEL_MS") {
+            use objc2::{msg_send, sel, class};
+            use objc2::runtime::AnyObject;
+            let secs = ms.parse::<f64>().unwrap_or(1000.0) / 1000.0;
+            let m = menu.ns_menu() as *mut AnyObject;
+            unsafe {
+                let modes: *mut AnyObject = msg_send![class!(NSMutableArray), array];
+                for name in ["NSEventTrackingRunLoopMode", "kCFRunLoopDefaultMode", "NSModalPanelRunLoopMode"] {
+                    let s = objc2_foundation::NSString::from_str(name);
+                    let _: () = msg_send![modes, addObject: &*s];
+                }
+                let nil: *const AnyObject = std::ptr::null();
+                if let Some(i) = std::env::var("FONTCRAFT_TEST_MENU_PICK").ok().and_then(|s| s.parse::<isize>().ok()) {
+                    let item: *mut AnyObject = msg_send![m, itemAtIndex: i];
+                    let target: *mut AnyObject = msg_send![item, target];
+                    let action: objc2::runtime::Sel = msg_send![item, action];
+                    eprintln!("TEST: will choose item {i} (target {target:?})");
+                    let _: () = msg_send![target, performSelector: action, withObject: item, afterDelay: secs * 0.5, inModes: modes];
+                }
+                let _: () = msg_send![m, performSelector: sel!(cancelTracking), withObject: nil, afterDelay: secs, inModes: modes];
+            }
+            eprintln!("TEST: menu opens, closes itself in {secs} s");
+        }
         unsafe {
             #[cfg(target_os = "macos")]
             menu.show_context_menu_for_nsview(handle as *const std::ffi::c_void, None);
+            #[cfg(target_os = "macos")]
+            if std::env::var("FONTCRAFT_TEST_MENU_CANCEL_MS").is_ok() {
+                eprintln!("TEST: menu closed, back in FontCraft");
+            }
             #[cfg(target_os = "windows")]
             {
                 menu.attach_menu_subclass_for_hwnd(handle as isize);

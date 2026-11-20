@@ -9,7 +9,7 @@ if [ -z "$BIN" ]; then
   cargo build --release
   BIN=target/release/FontCraft
 fi
-[ -f assets/icons/fontcraft.icns ] || "$BIN" --make-icons assets/icons
+"$BIN" --make-icons assets/icons
 # The bundle is put together and signed in a temporary folder: in a folder iCloud keeps (such as
 # Documents) macOS adds Finder information to it while it is being signed, which codesign refuses.
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/fontcraft-app.XXXXXX")
@@ -17,7 +17,9 @@ APP="$STAGE/FontCraft.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/fontcraft"
 cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
-cp assets/icons/fontcraft.icns assets/icons/fontcraft-library.icns "$APP/Contents/Resources/"
+cp assets/icons/fontcraft.icns "$APP/Contents/Resources/AppIcon.icns"
+cp assets/icons/fontcraft.icns "$APP/Contents/Resources/fontcraft.icns"
+cp assets/icons/fontcraft-library.icns "$APP/Contents/Resources/"
 # The version shown by macOS (CFBundleShortVersionString, which RightFont also reads as its own
 # version: +[RFGlobals appVersion] 0x1000e95f0, string 0x100296281) is the one in Cargo.toml, so
 # every release built by GitHub Actions carries its own number.
@@ -46,6 +48,7 @@ ARCH=$(lipo -archs "$APP/Contents/MacOS/fontcraft" | tr ' ' '+')
 mkdir -p dist
 rm -rf dist/FontCraft.app
 ditto "$APP" dist/FontCraft.app
+touch dist/FontCraft.app
 ditto -c -k --keepParent "$APP" "dist/FontCraft-$VERSION-macos-$ARCH.zip"
 rm -rf "$STAGE"
 echo "Made dist/FontCraft.app — open it once (or copy it to Applications) so macOS learns the .fcl icon."

@@ -471,16 +471,51 @@ pub enum Arrow {
 fn system_arrow_image(kind: Arrow, px: u32) -> Option<egui::ColorImage> {
     #[cfg(target_os = "macos")]
     {
-        use objc2::runtime::AnyObject;
-        use objc2::{class, msg_send};
-        use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+        use objc2_foundation::NSString;
         let run = || unsafe {
             let name = NSString::from_str(match kind {
                 Arrow::PopUp => "chevron.up.chevron.down",
                 Arrow::Down => "chevron.down",
                 Arrow::Right => "chevron.right",
             });
-            let img: *mut AnyObject = msg_send![class!(NSImage), imageWithSystemSymbolName: &*name, accessibilityDescription: std::ptr::null::<AnyObject>()];
+            sf_symbol_mask(&name, px, 0.0)
+        };
+        objc2::exception::catch(std::panic::AssertUnwindSafe(run)).ok().flatten()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        win_arrow(kind, px)
+    }
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
+    {
+        linux_arrow(kind, px)
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = (kind, px);
+        None
+    }
+}
+
+/// An SF Symbol drawn by AppKit as a white alpha mask `px` pixels tall (`weight` 0 = the symbol's
+/// regular weight; otherwise an NSFontWeight such as 0.23 for semibold).
+#[cfg(target_os = "macos")]
+unsafe fn sf_symbol_mask(name: &objc2_foundation::NSString, px: u32, weight: f64) -> Option<egui::ColorImage> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+    {
+        {
+            let mut img: *mut AnyObject = msg_send![class!(NSImage), imageWithSystemSymbolName: name, accessibilityDescription: std::ptr::null::<AnyObject>()];
+            if !img.is_null() && weight != 0.0 {
+                let cfg: *mut AnyObject = msg_send![class!(NSImageSymbolConfiguration), configurationWithPointSize: px as f64, weight: weight];
+                if !cfg.is_null() {
+                    let w: *mut AnyObject = msg_send![img, imageWithSymbolConfiguration: cfg];
+                    if !w.is_null() {
+                        img = w;
+                    }
+                }
+            }
             if img.is_null() {
                 return None;
             }
@@ -510,10 +545,12 @@ fn system_arrow_image(kind: Arrow, px: u32) -> Option<egui::ColorImage> {
             // A template symbol is drawn in black: its alpha is the shape.
             let pixels = bytes.chunks_exact(4).map(|p| Color32::from_white_alpha(p[3])).collect();
             Some(egui::ColorImage::new([w as usize, h as usize], pixels))
-        };
-        objc2::exception::catch(std::panic::AssertUnwindSafe(run)).ok().flatten()
+        }
     }
-    #[cfg(target_os = "windows")]
+}
+
+#[cfg(target_os = "windows")]
+fn win_arrow(kind: Arrow, px: u32) -> Option<egui::ColorImage> {
     {
         use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
         let data = ["C:\\Windows\\Fonts\\SegoeIcons.ttf", "C:\\Windows\\Fonts\\segmdl2.ttf"].iter().find_map(|p| std::fs::read(p).ok())?;
@@ -534,7 +571,10 @@ fn system_arrow_image(kind: Arrow, px: u32) -> Option<egui::ColorImage> {
         });
         Some(img)
     }
-    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
+}
+
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
+fn linux_arrow(kind: Arrow, px: u32) -> Option<egui::ColorImage> {
     {
         let theme = crate::paths::command("gsettings").args(["get", "org.gnome.desktop.interface", "icon-theme"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().trim_matches('\'').to_string()).unwrap_or_default();
         let mut candidates = Vec::new();
@@ -557,9 +597,46 @@ fn system_arrow_image(kind: Arrow, px: u32) -> Option<egui::ColorImage> {
         let pixels = pix.pixels().iter().map(|p| Color32::from_white_alpha(p.alpha())).collect();
         Some(egui::ColorImage::new([s as usize, s as usize], pixels))
     }
-    #[cfg(target_os = "android")]
+}
+
+/// A system symbol (macOS: the SF Symbol `name`, the same pictures Finder's sidebar uses) drawn
+/// `pt` points tall, centred at `c` and tinted `tint`. Returns false when the system has none, so
+/// the caller draws its own picture instead.
+pub fn symbol(ui: &Ui, name: &str, c: Pos2, pt: f32, tint: Color32) -> bool {
+    let ctx = ui.ctx();
+    let ppp = ctx.pixels_per_point();
+    let px = (pt * ppp).round().max(4.0) as u32;
+    let id = egui::Id::unique(("sf-symbol", name, px));
+    let tex = ctx.data_mut(|d| d.get_temp::<Option<egui::TextureHandle>>(id)).unwrap_or_else(|| {
+        let img = symbol_image(name, px);
+        let t = img.map(|img| ctx.load_texture(format!("sf-{name}"), img, egui::TextureOptions::LINEAR));
+        ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+        t
+    });
+    match tex {
+        Some(t) => {
+            let mut size = t.size_vec2() / ppp;
+            // Wide symbols keep to the same box as the others.
+            let max_w = pt * 1.35;
+            if size.x > max_w {
+                size *= max_w / size.x;
+            }
+            ui.painter().image(t.id(), Rect::from_center_size(c, size), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint);
+            true
+        }
+        None => false,
+    }
+}
+
+fn symbol_image(name: &str, px: u32) -> Option<egui::ColorImage> {
+    #[cfg(target_os = "macos")]
     {
-        let _ = (kind, px);
+        let run = || unsafe { sf_symbol_mask(&objc2_foundation::NSString::from_str(name), px, 0.0) };
+        objc2::exception::catch(std::panic::AssertUnwindSafe(run)).ok().flatten()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (name, px);
         None
     }
 }
@@ -599,28 +676,6 @@ pub fn disclosure(ui: &Ui, c: Pos2, open: bool, ink: Color32) {
     }
 }
 
-/// A sidebar section header the system's way, with its disclosure arrow (the system's own
-/// chevron, pointing down when open): macOS puts it right of the title, as Finder's sidebar does;
-/// Windows and GNOME before it, as their trees do. Clicking the header folds or unfolds it.
-/// Returns whether it was clicked; `extra` adds controls at the right (such as "+").
-pub fn section_header(ui: &mut Ui, title: &str, open: bool, ink: Color32, extra: impl FnOnce(&mut Ui)) -> bool {
-    let w = ui.available_width();
-    let h = 22.0;
-    let (r, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
-    let font = egui::FontId::proportional(11.5);
-    let galley = ui.painter().layout_no_wrap(title.to_string(), font.clone(), ink);
-    let left = r.left() + 8.0;
-    let (text_x, arrow_c) = if cfg!(target_os = "macos") {
-        (left, Pos2::new(left + galley.size().x + 10.0, r.center().y))
-    } else {
-        (left + 14.0, Pos2::new(left + 5.0, r.center().y))
-    };
-    ui.painter().galley(Pos2::new(text_x, r.center().y - galley.size().y / 2.0), galley, ink);
-    disclosure(ui, arrow_c, open, ink);
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    extra(&mut child);
-    resp.clicked()
-}
 
 /// Draws the system's drop-down arrow centred in `rect` (macOS: on its accent-coloured square, as
 /// its pop-up buttons show it); FontCraft's own drawing of the same shape where the system gives none.
@@ -731,8 +786,8 @@ fn read_system_colors(dark: bool) -> SysColors {
         let secondary = read(msg_send![class!(NSColor), secondaryLabelColor], fallback.secondary);
         let separator = read(msg_send![class!(NSColor), separatorColor], fallback.separator);
         let _: () = msg_send![class!(NSAppearance), setCurrentAppearance: previous];
-        // A sidebar is the window's colour (its translucent material sits on it).
-        SysColors { window, content, sidebar: window, label, secondary, separator }
+        let sidebar = if dark { Color32::from_rgb(0x24, 0x24, 0x26) } else { Color32::from_rgb(0xec, 0xec, 0xec) };
+        SysColors { window, content, sidebar, label, secondary, separator }
     };
     objc2::exception::catch(std::panic::AssertUnwindSafe(run)).unwrap_or(fallback)
 }
@@ -752,9 +807,9 @@ fn fallback_colors(dark: bool) -> SysColors {
             SysColors { window: Color32::from_rgb(0xf3, 0xf3, 0xf3), content: Color32::WHITE, sidebar: Color32::from_rgb(0xf3, 0xf3, 0xf3), label: rgba_u8(0, 0, 0, 0.894), secondary: rgba_u8(0, 0, 0, 0.62), separator: rgba_u8(0, 0, 0, 0.08) }
         }
     } else if cfg!(target_os = "macos") {
-        // macOS's named colours (as AppKit reports them in Aqua and Dark Aqua).
+        // macOS Finder / Source List: light sidebar #ECECEC on #FFFFFF content; dark #242426 on #1E1E1E content.
         if dark {
-            SysColors { window: Color32::from_rgb(0x32, 0x32, 0x32), content: Color32::from_rgb(0x1e, 0x1e, 0x1e), sidebar: Color32::from_rgb(0x32, 0x32, 0x32), label: rgba_u8(255, 255, 255, 0.85), secondary: rgba_u8(255, 255, 255, 0.55), separator: rgba_u8(255, 255, 255, 0.1) }
+            SysColors { window: Color32::from_rgb(0x24, 0x24, 0x26), content: Color32::from_rgb(0x1e, 0x1e, 0x1e), sidebar: Color32::from_rgb(0x24, 0x24, 0x26), label: rgba_u8(255, 255, 255, 0.85), secondary: rgba_u8(255, 255, 255, 0.55), separator: rgba_u8(255, 255, 255, 0.1) }
         } else {
             SysColors { window: Color32::from_rgb(0xec, 0xec, 0xec), content: Color32::WHITE, sidebar: Color32::from_rgb(0xec, 0xec, 0xec), label: rgba_u8(0, 0, 0, 0.85), secondary: rgba_u8(0, 0, 0, 0.5), separator: rgba_u8(0, 0, 0, 0.1) }
         }
@@ -764,4 +819,244 @@ fn fallback_colors(dark: bool) -> SysColors {
     } else {
         SysColors { window: Color32::from_rgb(0xfa, 0xfa, 0xfb), content: Color32::WHITE, sidebar: Color32::from_rgb(0xeb, 0xeb, 0xed), label: rgba_u8(0, 0, 6, 0.8), secondary: rgba_u8(0, 0, 6, 0.55), separator: rgba_u8(0, 0, 6, 0.15) }
     }
+}
+
+/// Text written by the system's own text engine, as Finder writes its sidebar (macOS: AppKit's
+/// system font at `pt` points and `weight`, an NSFontWeight: 0 regular, 0.3 semibold). egui's copy
+/// of the same font draws the large-size design, about 12 % narrower at 13 points than what Finder
+/// shows ("Todas las fuentes": 93.8 against AppKit's 106.1 points), so the sidebar asks the system.
+/// Placed by `align` at `pos`, tinted `color`; None where the system can't (FontCraft then draws it).
+pub fn sys_text(ui: &Ui, pos: Pos2, align: egui::Align2, text: &str, pt: f32, weight: f32, color: Color32) -> Option<Rect> {
+    if text.is_empty() {
+        return None;
+    }
+    let ctx = ui.ctx();
+    let ppp = ctx.pixels_per_point();
+    let px = (pt * ppp * 4.0).round() as u32;
+    let id = egui::Id::unique(("sys-text", text, px, (weight * 100.0) as i32));
+    let tex = ctx.data_mut(|d| d.get_temp::<Option<egui::TextureHandle>>(id)).unwrap_or_else(|| {
+        let t = sys_text_image(text, pt as f64 * ppp as f64, weight as f64).map(|img| ctx.load_texture("sys-text", img, egui::TextureOptions::LINEAR));
+        ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+        t
+    });
+    let t = tex?;
+    let size = t.size_vec2() / ppp;
+    let rect = align.anchor_size(pos, size);
+    ui.painter().image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), color);
+    Some(rect)
+}
+
+/// How wide the system writes `text` (see `sys_text`), in points.
+pub fn sys_text_width(text: &str, pt: f32, weight: f32) -> Option<f32> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<HashMap<(String, u32, i32), f32>>> = Mutex::new(None);
+    let key = (text.to_string(), (pt * 100.0) as u32, (weight * 100.0) as i32);
+    if let Ok(mut c) = CACHE.lock() {
+        if let Some(w) = c.get_or_insert_with(HashMap::new).get(&key) {
+            return Some(*w);
+        }
+    }
+    let w = sys_text_measure(text, pt as f64, weight as f64)?;
+    if let Ok(mut c) = CACHE.lock() {
+        c.get_or_insert_with(HashMap::new).insert(key, w);
+    }
+    Some(w)
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn sys_text_attrs(pt: f64, weight: f64) -> *mut objc2::runtime::AnyObject {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    let font: *mut AnyObject = msg_send![class!(NSFont), systemFontOfSize: pt, weight: weight];
+    if font.is_null() {
+        return std::ptr::null_mut();
+    }
+    let key = objc2_foundation::NSString::from_str("NSFont");
+    msg_send![class!(NSDictionary), dictionaryWithObject: font, forKey: &*key]
+}
+
+#[cfg(target_os = "macos")]
+fn sys_text_measure(text: &str, pt: f64, weight: f64) -> Option<f32> {
+    use objc2::msg_send;
+    use objc2_foundation::{NSSize, NSString};
+    let run = || unsafe {
+        let attrs = sys_text_attrs(pt, weight);
+        if attrs.is_null() {
+            return None;
+        }
+        let s = NSString::from_str(text);
+        let size: NSSize = msg_send![&*s, sizeWithAttributes: attrs];
+        Some(size.width as f32)
+    };
+    objc2::exception::catch(std::panic::AssertUnwindSafe(run)).ok().flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn sys_text_image(text: &str, px: f64, weight: f64) -> Option<egui::ColorImage> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSPoint, NSSize, NSString};
+    let run = || unsafe {
+        let attrs = sys_text_attrs(px, weight);
+        if attrs.is_null() {
+            return None;
+        }
+        let s = NSString::from_str(text);
+        let size: NSSize = msg_send![&*s, sizeWithAttributes: attrs];
+        let w = (size.width.ceil() as isize + 2).max(1);
+        let h = (size.height.ceil() as isize).max(1);
+        let space = NSString::from_str("NSDeviceRGBColorSpace");
+        let rep: *mut AnyObject = msg_send![class!(NSBitmapImageRep), alloc];
+        let rep: *mut AnyObject = msg_send![rep, initWithBitmapDataPlanes: std::ptr::null_mut::<*mut u8>(), pixelsWide: w, pixelsHigh: h, bitsPerSample: 8isize, samplesPerPixel: 4isize, hasAlpha: true, isPlanar: false, colorSpaceName: &*space, bytesPerRow: w * 4, bitsPerPixel: 32isize];
+        if rep.is_null() {
+            return None;
+        }
+        let gctx: *mut AnyObject = msg_send![class!(NSGraphicsContext), graphicsContextWithBitmapImageRep: rep];
+        let _: () = msg_send![class!(NSGraphicsContext), saveGraphicsState];
+        let _: () = msg_send![class!(NSGraphicsContext), setCurrentContext: gctx];
+        let _: () = msg_send![&*s, drawAtPoint: NSPoint::new(1.0, 0.0), withAttributes: attrs];
+        let _: () = msg_send![class!(NSGraphicsContext), restoreGraphicsState];
+        let data: *const u8 = msg_send![rep, bitmapData];
+        if data.is_null() {
+            return None;
+        }
+        let bytes = std::slice::from_raw_parts(data, (w * h * 4) as usize);
+        let pixels = bytes.chunks_exact(4).map(|p| Color32::from_white_alpha(p[3])).collect();
+        Some(egui::ColorImage::new([w as usize, h as usize], pixels))
+    };
+    objc2::exception::catch(std::panic::AssertUnwindSafe(run)).ok().flatten()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sys_text_measure(_text: &str, _pt: f64, _weight: f64) -> Option<f32> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sys_text_image(_text: &str, _px: f64, _weight: f64) -> Option<egui::ColorImage> {
+    None
+}
+
+/// The sidebar size chosen in System Settings › Appearance (macOS NSTableViewDefaultSizeMode:
+/// 1 small, 2 medium, 3 large), which sets the size of Finder's sidebar text and icons. Read again
+/// every few seconds, so a change there shows here too. Medium elsewhere.
+pub fn sidebar_size_mode() -> u8 {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, u8)>> = Mutex::new(None);
+    if let Ok(c) = CACHE.lock() {
+        if let Some((t, v)) = *c {
+            if t.elapsed() < Duration::from_secs(5) {
+                return v;
+            }
+        }
+    }
+    let v = read_sidebar_size_mode().clamp(1, 3);
+    if let Ok(mut c) = CACHE.lock() {
+        *c = Some((Instant::now(), v));
+    }
+    v
+}
+
+#[cfg(target_os = "macos")]
+fn read_sidebar_size_mode() -> u8 {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    let run = || unsafe {
+        let d: *mut AnyObject = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        if d.is_null() {
+            return 2;
+        }
+        let key = objc2_foundation::NSString::from_str("NSTableViewDefaultSizeMode");
+        let v: isize = msg_send![d, integerForKey: &*key];
+        if v == 0 { 2 } else { v as u8 }
+    };
+    objc2::exception::catch(std::panic::AssertUnwindSafe(run)).unwrap_or(2)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_sidebar_size_mode() -> u8 {
+    2
+}
+
+/// A system symbol sized to go with text of `pt` points, as Finder's sidebar sizes its icons to
+/// its text (macOS: the SF Symbol in a point-size configuration at its large scale, drawn at its
+/// own width and height). Returns the rect it took, or None (the caller draws its own picture).
+pub fn symbol_for_text(ui: &Ui, name: &str, c: Pos2, pt: f32, tint: Color32) -> Option<Rect> {
+    let ctx = ui.ctx();
+    let ppp = ctx.pixels_per_point();
+    let id = egui::Id::unique(("sf-symbol-text", name, (pt * 10.0) as u32, (ppp * 10.0) as u32));
+    let tex = ctx.data_mut(|d| d.get_temp::<Option<(egui::TextureHandle, Vec2)>>(id)).unwrap_or_else(|| {
+        let t = symbol_text_image(name, pt as f64, ppp as f64).map(|(img, size)| (ctx.load_texture(format!("sf-{name}"), img, egui::TextureOptions::LINEAR), size));
+        ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+        t
+    });
+    let (t, size) = tex?;
+    let rect = Rect::from_center_size(c, size);
+    ui.painter().image(t.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint);
+    Some(rect)
+}
+
+#[cfg(target_os = "macos")]
+fn symbol_text_image(name: &str, pt: f64, ppp: f64) -> Option<(egui::ColorImage, Vec2)> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+    let run = || unsafe {
+        let n = NSString::from_str(name);
+        let img: *mut AnyObject = msg_send![class!(NSImage), imageWithSystemSymbolName: &*n, accessibilityDescription: std::ptr::null::<AnyObject>()];
+        if img.is_null() {
+            return None;
+        }
+        // NSFontWeightRegular, NSImageSymbolScaleLarge (3).
+        let cfg: *mut AnyObject = msg_send![class!(NSImageSymbolConfiguration), configurationWithPointSize: pt, weight: 0.0f64, scale: 3isize];
+        let img: *mut AnyObject = if cfg.is_null() { img } else { msg_send![img, imageWithSymbolConfiguration: cfg] };
+        if img.is_null() {
+            return None;
+        }
+        let size: NSSize = msg_send![img, size];
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return None;
+        }
+        let w = (size.width * ppp).ceil().max(1.0) as isize;
+        let h = (size.height * ppp).ceil().max(1.0) as isize;
+        let space = NSString::from_str("NSDeviceRGBColorSpace");
+        let rep: *mut AnyObject = msg_send![class!(NSBitmapImageRep), alloc];
+        let rep: *mut AnyObject = msg_send![rep, initWithBitmapDataPlanes: std::ptr::null_mut::<*mut u8>(), pixelsWide: w, pixelsHigh: h, bitsPerSample: 8isize, samplesPerPixel: 4isize, hasAlpha: true, isPlanar: false, colorSpaceName: &*space, bytesPerRow: w * 4, bitsPerPixel: 32isize];
+        if rep.is_null() {
+            return None;
+        }
+        let gctx: *mut AnyObject = msg_send![class!(NSGraphicsContext), graphicsContextWithBitmapImageRep: rep];
+        let _: () = msg_send![class!(NSGraphicsContext), saveGraphicsState];
+        let _: () = msg_send![class!(NSGraphicsContext), setCurrentContext: gctx];
+        let _: () = msg_send![img, drawInRect: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w as f64, h as f64))];
+        let _: () = msg_send![class!(NSGraphicsContext), restoreGraphicsState];
+        let data: *const u8 = msg_send![rep, bitmapData];
+        if data.is_null() {
+            return None;
+        }
+        let bytes = std::slice::from_raw_parts(data, (w * h * 4) as usize);
+        let pixels = bytes.chunks_exact(4).map(|p| Color32::from_white_alpha(p[3])).collect();
+        Some((egui::ColorImage::new([w as usize, h as usize], pixels), Vec2::new(size.width as f32, size.height as f32)))
+    };
+    objc2::exception::catch(std::panic::AssertUnwindSafe(run)).ok().flatten()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn symbol_text_image(_name: &str, _pt: f64, _ppp: f64) -> Option<(egui::ColorImage, Vec2)> {
+    None
+}
+
+/// Brings a dialog (by its key) in front of every other app's window, as an alert about the app in
+/// front: it floats above other windows while open and takes the keyboard, without first bringing
+/// FontCraft's main window up. Nothing in test pictures (the dialog is drawn inside the window).
+pub fn dialog_to_front(ctx: &egui::Context, key: &str) {
+    if ctx.embed_viewports() {
+        return;
+    }
+    let vid = egui::ViewportId::from_hash_of(("dialog", key));
+    ctx.send_viewport_cmd_to(vid, egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+    ctx.send_viewport_cmd_to(vid, egui::ViewportCommand::Focus);
+    ctx.request_repaint_of(vid);
 }

@@ -24,6 +24,12 @@ pub struct MissingState {
     /// The app (bundle id / key) it is open in.
     pub bundle: String,
     pub names: Vec<String>,
+    /// The names came from an app asking the system (no document: the fonts stay on while the app runs).
+    pub for_app: bool,
+    /// Frames left to bring the window in front of the app the fonts are missing from.
+    pub bring_front: u8,
+    /// FontCraft was in the menu bar when the window came up: it goes back there when it closes.
+    pub rehide: bool,
     /// Missing font → the catalog family chosen to stand in for it.
     pub replaced: HashMap<String, String>,
     pub search: String,
@@ -81,7 +87,11 @@ impl App {
     }
 
     /// A font an app asked for that FontCraft doesn't have (macOS font requests).
+    #[allow(dead_code)]
     pub(crate) fn add_missing(&mut self, font: String, app: String) {
+        if !crate::autoact::is_supported_app("", &app) {
+            return;
+        }
         if !self.missing.open {
             self.missing.names.clear();
             self.missing.doc = app;
@@ -91,6 +101,23 @@ impl App {
             self.missing.names.push(font);
         }
         self.missing.open = true;
+        self.missing.bring_front = 3;
+    }
+
+    /// A font an app asked the system for (macOS font requests): shown in the window with the app it
+    /// is for, so "Activate" turns it on for that app (and off again when the app quits).
+    pub(crate) fn add_requested(&mut self, font: String, bundle: String, app: String) {
+        if !self.missing.open || self.missing.bundle != bundle {
+            self.missing.names.clear();
+            self.missing.doc = app;
+            self.missing.bundle = bundle;
+            self.missing.for_app = true;
+        }
+        if !self.missing.names.contains(&font) {
+            self.missing.names.push(font);
+        }
+        self.missing.open = true;
+        self.missing.bring_front = 3;
     }
 
     /// Each frame: reads the front document of the app FontCraft works with when it changes, and
@@ -101,11 +128,24 @@ impl App {
             if self.frame == 20 {
                 if let Ok(v) = std::env::var("FONTCRAFT_TEST_MISSING") {
                     for n in v.split(',') {
-                        self.add_missing(n.trim().to_string(), "Test.docx".into());
+                        self.add_requested(n.trim().to_string(), "com.canva.affinity".into(), "Affinity".into());
                     }
                 }
             }
             return;
+        }
+        // DesignCraft (its channel): a document brought to the front uses fonts not installed;
+        // they go to the Missing Fonts window for DesignCraft, as fonts other apps ask for do.
+        for (_doc, families) in self.autoact.take_designcraft_missing() {
+            for family in families {
+                self.add_requested(family, crate::autoact::designcraft::BUNDLE.to_string(), "DesignCraft".to_string());
+            }
+        }
+        // PhotoCraft (its channel), the same way.
+        for (_doc, families) in self.autoact.take_photocraft_missing() {
+            for family in families {
+                self.add_requested(family, crate::autoact::photocraft::BUNDLE.to_string(), "PhotoCraft".to_string());
+            }
         }
         // A finished read.
         let done = self.missing.job.lock().unwrap().take();
@@ -123,8 +163,10 @@ impl App {
             if !names.is_empty() {
                 self.missing.names = names;
                 self.missing.doc = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                self.missing.for_app = false;
                 self.missing.bundle = bundle;
                 self.missing.open = true;
+                self.missing.bring_front = 3;
             }
         }
         // The front document, as the watcher saw it.
@@ -174,7 +216,7 @@ impl App {
         let n = on.len();
         if !on.is_empty() {
             let bundle = self.missing.bundle.clone();
-            let doc = (!self.missing.doc.is_empty() && !bundle.is_empty()).then(|| self.missing.doc.clone());
+            let doc = (!self.missing.for_app && !self.missing.doc.is_empty() && !bundle.is_empty()).then(|| self.missing.doc.clone());
             self.autoact.record(on, bundle, doc);
         }
         n
@@ -197,60 +239,153 @@ impl App {
         let mut activate_all = false;
         let mut cancel = false;
         let mut pick: Option<(String, String)> = None;
+        let mut activate_one: Option<String> = None;
         let doc = self.missing.doc.clone();
         let mut search = std::mem::take(&mut self.missing.search);
         let replaced = self.missing.replaced.clone();
-        let (_, closed) = oslook::dialog_centered(ctx, "missing-fonts", t(K::MissingTitle), 560.0, pal.panel, None, |ui| {
-            ui.add(egui::Label::new(egui::RichText::new(t(K::MissingIntro).replace("{n}", &names.len().to_string()).replace("{doc}", &doc)).color(pal.ink)).wrap());
-            ui.add_space(8.0);
-            if !found.is_empty() {
-                ui.label(egui::RichText::new(t(K::MissingInCatalog)).size(12.0).strong().color(pal.muted));
-                for n in &found {
-                    ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                        crate::libs::paint_asterisk(ui.painter(), r.center(), crate::libs::LIME);
-                        let label = match replaced.get(n) {
-                            Some(r) => t(K::ReplacedWith).replace("{old}", n).replace("{new}", r),
-                            None => n.clone(),
-                        };
-                        ui.add(egui::Label::new(egui::RichText::new(label).color(pal.ink)).truncate());
-                    });
-                }
-                ui.add_space(6.0);
-            }
-            if !not_found.is_empty() {
-                ui.label(egui::RichText::new(t(K::MissingNotFound)).size(12.0).strong().color(pal.muted));
-                for n in &not_found {
-                    ui.horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-                        crate::libs::paint_asterisk(ui.painter(), r.center(), crate::libs::ASTERISK_GRAY);
-                        let room = (ui.available_width() - 190.0).max(60.0);
-                        ui.add_sized([room, 20.0], egui::Label::new(egui::RichText::new(n).color(pal.warn)).truncate());
-                        oslook::menu_popup(ui, t(K::ReplaceWith), 170.0, |ui| {
-                            oslook::field(ui, egui::TextEdit::singleline(&mut search).hint_text("…").desired_width(240.0));
-                            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                                for f in &families {
-                                    if ui.add(egui::Button::new(f).frame(false)).clicked() {
-                                        pick = Some((n.clone(), f.clone()));
-                                        ui.close();
-                                    }
-                                }
+        let is_es = crate::i18n::LANGS[lang].code == "es";
+        let icon_tex = {
+            let px = 64;
+            let img = egui::ColorImage::from_rgba_unmultiplied(
+                [px, px],
+                &crate::appicon::render_styled(crate::appicon::Kind::App, px, pal.dark, self.settings.widget_style, self.settings.accent),
+            );
+            ctx.load_texture("fontcraft-missing-alert-icon", img, egui::TextureOptions::LINEAR)
+        };
+        let (_, closed) = oslook::dialog_centered(ctx, "missing-fonts", t(K::MissingTitle), 580.0, pal.panel, None, |ui| {
+            // macOS NSAlert header: app icon at left, bold headline and description at right
+            ui.horizontal(|ui| {
+                let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(64.0, 64.0), egui::Sense::hover());
+                ui.painter().image(
+                    icon_tex.id(),
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+                ui.add_space(14.0);
+                ui.vertical(|ui| {
+                    ui.add_space(2.0);
+                    ui.label(egui::RichText::new(t(K::MissingTitle)).size(16.0).strong().color(pal.ink));
+                    ui.add_space(4.0);
+                    let intro = t(K::MissingIntro).replace("{n}", &names.len().to_string()).replace("{doc}", &doc);
+                    ui.add(egui::Label::new(egui::RichText::new(intro).size(13.0).color(pal.ink)).wrap());
+                });
+            });
+            ui.add_space(14.0);
+
+            // Grouped table card for missing fonts (macOS Source List / RightFont alert style)
+            egui::Frame::group(ui.style())
+                .fill(pal.card)
+                .corner_radius(egui::CornerRadius::same(8))
+                .stroke(egui::Stroke::new(1.0, pal.line))
+                .inner_margin(egui::Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                        if !found.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(t(K::MissingInCatalog)).size(11.5).strong().color(pal.muted));
+                                ui.label(egui::RichText::new(format!("({})", found.len())).size(11.5).color(pal.muted));
                             });
-                        });
+                            ui.add_space(4.0);
+                            for n in &found {
+                                ui.horizontal(|ui| {
+                                    let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                                    crate::libs::paint_asterisk(ui.painter(), r.center(), crate::libs::LIME);
+                                    let label = match replaced.get(n) {
+                                        Some(r) => t(K::ReplacedWith).replace("{old}", n).replace("{new}", r),
+                                        None => n.clone(),
+                                    };
+                                    ui.add(egui::Label::new(egui::RichText::new(label).strong().color(pal.ink)).truncate());
+                                    // In the catalog: turned on with one click, or swapped for another.
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        oslook::menu_popup(ui, t(K::ReplaceWith), 140.0, |ui| {
+                                            oslook::field(ui, egui::TextEdit::singleline(&mut search).hint_text("…").desired_width(220.0));
+                                            egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                                                for f in &families {
+                                                    if ui.add(egui::Button::new(f).frame(false)).clicked() {
+                                                        pick = Some((n.clone(), f.clone()));
+                                                        ui.close();
+                                                    }
+                                                }
+                                            });
+                                        });
+                                        if ui.button(if is_es { "Activar" } else { "Activate" }).clicked() {
+                                            activate_one = Some(n.clone());
+                                        }
+                                    });
+                                });
+                            }
+                            ui.add_space(6.0);
+                        }
+                        if !not_found.is_empty() {
+                            if !found.is_empty() {
+                                ui.separator();
+                                ui.add_space(6.0);
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(t(K::MissingNotFound)).size(11.5).strong().color(pal.warn));
+                                ui.label(egui::RichText::new(format!("({})", not_found.len())).size(11.5).color(pal.muted));
+                            });
+                            ui.add_space(4.0);
+                            for n in &not_found {
+                                ui.horizontal(|ui| {
+                                    let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                                    crate::libs::paint_asterisk(ui.painter(), r.center(), crate::libs::ASTERISK_GRAY);
+                                    let room = (ui.available_width() - 175.0).max(60.0);
+                                    ui.add_sized([room, 20.0], egui::Label::new(egui::RichText::new(n).color(pal.warn)).truncate());
+                                    oslook::menu_popup(ui, t(K::ReplaceWith), 160.0, |ui| {
+                                        oslook::field(ui, egui::TextEdit::singleline(&mut search).hint_text("…").desired_width(220.0));
+                                        egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                                            for f in &families {
+                                                if ui.add(egui::Button::new(f).frame(false)).clicked() {
+                                                    pick = Some((n.clone(), f.clone()));
+                                                    ui.close();
+                                                }
+                                            }
+                                        });
+                                    });
+                                });
+                            }
+                        }
                     });
-                }
-            }
-            ui.add_space(12.0);
+                });
+
+            ui.add_space(14.0);
             ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), oslook::metrics().control_h + 4.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if oslook::default_button(ui, !found.is_empty(), t(K::ActivateAll)).clicked() {
+                let act_text = if found.is_empty() {
+                    t(K::ActivateAll).to_string()
+                } else {
+                    format!("{} ({})", t(K::ActivateAll), found.len())
+                };
+                if oslook::default_button(ui, !found.is_empty(), &act_text).clicked() {
                     activate_all = true;
                 }
+                ui.add_space(8.0);
                 if ui.button(t(K::Cancel)).clicked() {
                     cancel = true;
                 }
             });
         });
         self.missing.search = search;
+        // In front of the app the fonts are missing from, as soon as it opens (a few frames, so the
+        // window exists when it's asked).
+        if self.missing.bring_front > 0 {
+            // FontCraft working in the menu bar: its windows come back without the main one, so
+            // only this window shows over the app; it goes back to the menu bar afterwards.
+            if self.screenshot.is_none() && crate::background::app_hidden() {
+                crate::background::unhide_quietly();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.missing.rehide = true;
+            }
+            self.missing.bring_front -= 1;
+            oslook::dialog_to_front(ctx, "missing-fonts");
+            ctx.request_repaint();
+        }
+        if let Some(n) = activate_one {
+            let k = self.activate_missing(std::slice::from_ref(&n));
+            self.missing.names.retain(|x| *x != n);
+            self.notice = Some(t(K::MissingActivatedN).replace("{n}", &k.to_string()));
+        }
         if let Some((old, new)) = pick {
             self.missing.replaced.insert(old.clone(), new.clone());
             let lines: Vec<String> = self.missing.replaced.iter().map(|(a, b)| format!("{a}\t{b}")).collect();
@@ -267,6 +402,12 @@ impl App {
         }
         if closed || cancel {
             self.missing.open = false;
+        }
+        // Closed after FontCraft was brought out of the menu bar for it: back there (the menu bar
+        // asterisk or the shortcut shows the main window again).
+        if !self.missing.open && self.missing.rehide {
+            self.missing.rehide = false;
+            crate::background::hide_app();
         }
     }
 }

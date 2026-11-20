@@ -1,6 +1,9 @@
 // No console window behind FontCraft on Windows.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+mod finder;
+mod gridview;
+mod keys;
 mod fonts;
 
 use eframe::egui::{
@@ -71,6 +74,37 @@ fn presets(lang: usize) -> [(&'static str, &'static str); 5] {
     ("abc", "abcdefghijklmnopqrstuvwxyz"),
     ("123", "0123456789 !?&@#%"),
     ]
+}
+
+fn class_label(lang: usize, class: fonts::Class, monospaced: bool) -> &'static str {
+    if monospaced {
+        if lang == 1 { "Monoespaciada" } else { "Monospaced" }
+    } else {
+        match class {
+            fonts::Class::Sans => "Sans Serif",
+            fonts::Class::Serif => "Serif",
+            fonts::Class::Slab => "Slab Serif",
+            fonts::Class::Script => "Script",
+            fonts::Class::Blackletter => "Blackletter",
+            fonts::Class::Display => "Display",
+            fonts::Class::Symbol => if lang == 1 { "Símbolos" } else { "Symbols" },
+            fonts::Class::Other => if lang == 1 { "Otras" } else { "Other" },
+        }
+    }
+}
+
+fn days_to_ymd(days: u64) -> (u32, u32, u32) {
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as u32, m, d)
 }
 
 /// Lets the window's own words show Chinese, Japanese, Korean and other scripts,
@@ -183,6 +217,7 @@ struct App {
     /// Font files the person switched on (loaded for other apps).
     active: HashSet<PathBuf>,
     new_lib: Option<libs::NewLib>,
+    pub(crate) folder_picker_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     /// A short message shown in the status bar (for example when activation fails).
     notice: Option<String>,
     /// Which families each library's lists hold, and each library's order.
@@ -198,7 +233,7 @@ struct App {
     import_dlg: Option<importdlg::ImportDlg>,
     autoact: autoact::AutoAct,
     bg: background::Background,
-    /// Started at login with --background: hide the window once it exists.
+    /// Started at login with --background: the menu bar asterisk shows even if the setting is off.
     start_hidden: bool,
     /// A panel edge or tab being dragged to resize: (left panel?, width when the drag began).
     resizing: Option<(bool, f32)>,
@@ -221,6 +256,12 @@ struct App {
     similar: Option<glyphtools::Similar>,
     /// The window's content view (macOS), for dragging glyphs out to other apps.
     ns_view: *mut std::ffi::c_void,
+    /// Started in the background (the menu bar asterisk kept, or --background at login): the window
+    /// eframe shows after its first frame is put away again as soon as it is up.
+    hide_at_start: bool,
+    /// The details panel's floating card this frame (screen points): the glyph preview sits
+    /// against its left edge, centred on it.
+    details_card: Option<Rect>,
     /// A drag out of the window was already started for the glyph being dragged.
     drag_out_tried: bool,
     print: Option<print::PrintDlg>,
@@ -265,6 +306,136 @@ enum TabAction {
     /// Held and dragged: the pointer moved this far sideways since the drag began.
     Drag(f32),
     DragEnd,
+}
+
+/// One of the toolbar's view switches (grid, list), drawn as before: a soft square under the pointer,
+/// accent-outlined when it's the view in use. Returns whether it was clicked.
+fn view_button(ui: &mut egui::Ui, pal: &Pal, on: bool, tip: &str, draw: impl FnOnce(&egui::Painter, Pos2, Color32)) -> bool {
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
+    if resp.hovered() || on {
+        ui.painter().rect_filled(r, 4.0, if on { pal.hover } else { pal.hover.gamma_multiply(0.5) });
+    }
+    if on {
+        ui.painter().rect_stroke(r, 4.0, Stroke::new(1.0, pal.accent), eframe::egui::StrokeKind::Inside);
+    }
+    draw(ui.painter(), r.center(), if on { pal.accent } else { pal.muted });
+    resp.on_hover_text(tip).clicked()
+}
+
+/// A magnifying glass, where the system has no symbol for it: a ring and a short handle.
+fn paint_magnifier(p: &egui::Painter, c: Pos2, col: Color32) {
+    let st = Stroke::new(1.5_f32, col);
+    let ring = c + Vec2::new(-1.2, -1.2);
+    p.circle_stroke(ring, 4.6, st);
+    p.line_segment([ring + Vec2::new(3.3, 3.3), ring + Vec2::new(6.6, 6.6)], Stroke::new(1.9_f32, col));
+}
+
+/// The system symbol Finder-style rows use for each sidebar entry (SF Symbols names).
+fn view_symbol(view: View) -> &'static str {
+    match view {
+        View::All => "textformat",
+        View::Favorites => "star",
+        View::Source(Source::System) => "gearshape",
+        View::Source(Source::Computer) => "desktopcomputer",
+        View::Source(Source::User) => "person",
+        View::Source(Source::Google) => "globe",
+        View::Source(Source::Adobe) => "a.square",
+        View::Source(_) => "books.vertical",
+        View::Mono => "chevron.left.forwardslash.chevron.right",
+        View::Class(fonts::Class::Sans) => "textformat.alt",
+        View::Class(fonts::Class::Serif) => "character",
+        View::Class(fonts::Class::Slab) => "a.square.fill",
+        View::Class(fonts::Class::Script) => "signature",
+        View::Class(fonts::Class::Blackletter) => "scroll",
+        View::Class(fonts::Class::Display) => "sparkles",
+        View::Class(fonts::Class::Symbol) => "staroflife",
+        View::Class(_) => "textformat",
+        View::Lib(_) | View::LibSet(..) => "folder",
+    }
+}
+
+/// FontCraft's own drawing of a sidebar entry's picture, where the system has no symbol.
+fn paint_view_icon(p: &egui::Painter, view: View, c: Pos2, icol: Color32) {
+    let st = Stroke::new(1.3_f32, icol);
+    match view {
+        View::All => {
+            for (dx, dy) in [(-3.0, -3.0), (3.0, -3.0), (-3.0, 3.0), (3.0, 3.0)] {
+                p.rect_filled(Rect::from_center_size(c + Vec2::new(dx, dy), Vec2::splat(4.5)), 1.0, icol);
+            }
+        }
+        View::Favorites => {
+            p.text(c, Align2::CENTER_CENTER, "★", FontId::proportional(15.0), icol);
+        }
+        View::Source(Source::Google) => gfonts::paint_mark(p, c, icol),
+        View::Source(Source::Adobe) => {
+            p.rect_stroke(Rect::from_center_size(c, Vec2::splat(13.0)), 3.0, st, eframe::egui::StrokeKind::Inside);
+            p.text(c + Vec2::new(0.0, 0.5), Align2::CENTER_CENTER, "A", FontId::proportional(10.5), icol);
+        }
+        View::Source(_) => {
+            p.rect_stroke(Rect::from_center_size(c, Vec2::new(13.0, 10.0)), 2.0, st, eframe::egui::StrokeKind::Inside);
+            p.line_segment([c + Vec2::new(-3.0, 7.0), c + Vec2::new(3.0, 7.0)], st);
+        }
+        View::Mono => {
+            for dy in [-4.0, 0.0, 4.0] {
+                p.line_segment([c + Vec2::new(-6.0, dy), c + Vec2::new(6.0, dy)], st);
+            }
+        }
+        View::Class(fonts::Class::Serif) | View::Class(fonts::Class::Sans) => {
+            // A capital T, with little feet for "serif".
+            let st = Stroke::new(1.6_f32, icol);
+            p.line_segment([c + Vec2::new(-5.5, -5.5), c + Vec2::new(5.5, -5.5)], st);
+            p.line_segment([c + Vec2::new(0.0, -5.5), c + Vec2::new(0.0, 5.5)], st);
+            if view == View::Class(fonts::Class::Serif) {
+                p.line_segment([c + Vec2::new(-2.8, 5.5), c + Vec2::new(2.8, 5.5)], st);
+                p.line_segment([c + Vec2::new(-5.5, -5.5), c + Vec2::new(-5.5, -3.0)], st);
+                p.line_segment([c + Vec2::new(5.5, -5.5), c + Vec2::new(5.5, -3.0)], st);
+            }
+        }
+        View::Class(fonts::Class::Slab) => {
+            // A capital T with heavy block feet.
+            let st = Stroke::new(1.6_f32, icol);
+            p.line_segment([c + Vec2::new(-5.5, -5.5), c + Vec2::new(5.5, -5.5)], st);
+            p.line_segment([c + Vec2::new(0.0, -5.5), c + Vec2::new(0.0, 5.5)], st);
+            p.rect_filled(Rect::from_center_size(c + Vec2::new(0.0, 5.0), Vec2::new(6.5, 2.4)), 0.0, icol);
+            p.rect_filled(Rect::from_min_size(c + Vec2::new(-6.3, -6.5), Vec2::new(2.4, 4.0)), 0.0, icol);
+            p.rect_filled(Rect::from_min_size(c + Vec2::new(3.9, -6.5), Vec2::new(2.4, 4.0)), 0.0, icol);
+        }
+        View::Class(fonts::Class::Blackletter) => {
+            // Broken, angular strokes like a pen-drawn black letter.
+            let st = Stroke::new(1.6_f32, icol);
+            let pts = vec![
+                c + Vec2::new(-5.5, 6.0), c + Vec2::new(-5.5, -3.0), c + Vec2::new(-2.5, -6.0), c + Vec2::new(0.0, -3.5),
+                c + Vec2::new(2.5, -6.0), c + Vec2::new(5.5, -3.0), c + Vec2::new(5.5, 6.0),
+            ];
+            p.add(egui::Shape::line(pts, st));
+            p.line_segment([c + Vec2::new(0.0, -3.5), c + Vec2::new(0.0, 4.0)], st);
+        }
+        View::Class(fonts::Class::Display) => {
+            // A star: decorative type.
+            let pts: Vec<Pos2> = (0..10)
+                .map(|i| {
+                    let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+                    c + Vec2::angled(a) * if i % 2 == 0 { 7.0 } else { 3.0 }
+                })
+                .collect();
+            p.add(egui::Shape::closed_line(pts, Stroke::new(1.4_f32, icol)));
+        }
+        View::Class(fonts::Class::Script) => {
+            let st = Stroke::new(1.6_f32, icol);
+            let pts = [c + Vec2::new(-6.0, 5.0), c + Vec2::new(-1.0, -12.0), c + Vec2::new(3.0, 9.0), c + Vec2::new(6.5, -3.0)];
+            p.add(egui::epaint::CubicBezierShape::from_points_stroke(pts, false, Color32::TRANSPARENT, st));
+        }
+        View::Class(_) => {
+            p.circle_stroke(c, 6.0, st);
+            let d = 3.2;
+            p.add(egui::Shape::convex_polygon(
+                vec![c + Vec2::new(0.0, -d), c + Vec2::new(d, 0.0), c + Vec2::new(0.0, d), c + Vec2::new(-d, 0.0)],
+                icol,
+                Stroke::NONE,
+            ));
+        }
+        View::Lib(_) | View::LibSet(..) => {}
+    }
 }
 
 /// A small tab sitting on a panel's edge. `on_left` is the left panel's tab.
@@ -334,13 +505,16 @@ fn panel_edge(ctx: &egui::Context, id: &str, edge_x: f32) -> (Option<f32>, bool)
 
 /// The details panel's widest size.
 const DETAILS_MAX_W: f32 = 1000.0;
+/// Room inside the details card on either side.
+const DETAILS_PAD: f32 = 12.0;
 
 impl App {
     /// The details panel's narrowest size: four columns of glyphs on its Glyphs page at the glyph
     /// size chosen there (each cell is 1.6 × the glyph size), plus the panel's margins (16 px each
     /// side), the grid's 4 px and room for the scroll bar.
     pub(crate) fn details_min_w(&self) -> f32 {
-        (4.0 * self.glyph_px * 1.6 + 4.0 + 2.0 * 16.0 + 12.0).min(DETAILS_MAX_W)
+        // Four glyph columns, the card's inset and its inner room on both sides.
+        (4.0 * self.glyph_px * 1.6 + 4.0 + 2.0 * (finder::CARD_INSET as f32 + DETAILS_PAD) + 12.0).min(DETAILS_MAX_W)
     }
 }
 
@@ -393,7 +567,16 @@ impl App {
         if screenshot.is_some() {
             cc.egui_ctx.set_embed_viewports(true);
         }
-        let settings = Settings::load();
+        let mut settings = Settings::load();
+        // FONTCRAFT_VIEW (test pictures): grid, samples or list, without saving it.
+        if screenshot.is_some() {
+            match std::env::var("FONTCRAFT_VIEW").as_deref() {
+                Ok("grid") => settings.view_mode = settings::ViewMode::Grid,
+                Ok("samples") => settings.view_mode = settings::ViewMode::Samples,
+                Ok("list") => settings.view_mode = settings::ViewMode::List,
+                _ => {}
+            }
+        }
         let libraries = libs::load_libraries();
         // FontCraft's libraries show FontCraft's library icon in the file manager (Windows, Linux).
         {
@@ -430,12 +613,20 @@ impl App {
             .map(libs::NewLib::new)
             .or_else(|| std::env::var("FONTCRAFT_NEW_FCL").ok().map(|_| libs::NewLib::library()));
         let share_choice = fcl::ShareWith::from_setting(&settings.share);
+        let start_hidden = screenshot.is_none() && std::env::args().any(|a| a == "--background");
+        // "Keep FontCraft in the menu bar" on (or started at login): FontCraft starts in the
+        // background, only its menu bar asterisk showing, until the asterisk is clicked.
+        let hide_at_start = starts_in_background(&settings, screenshot.is_some());
+        let bg = background::Background::default();
+        background::set_keep_in_menu_bar(settings.background || start_hidden);
+        background::set_in_background(hide_at_start);
         let mut app = App {
             lib,
             view,
             libraries,
             active: libs::load_active(),
             new_lib,
+            folder_picker_rx: None,
             notice: None,
             members: Vec::new(),
             lib_collapsed: HashSet::new(),
@@ -445,8 +636,8 @@ impl App {
             recording_hotkey: false,
             import_dlg: if std::env::var("FONTCRAFT_IMPORT_FONTS").is_ok() { Some(importdlg::ImportDlg::default()) } else { None },
             autoact: autoact::AutoAct::default(),
-            bg: background::Background::default(),
-            start_hidden: std::env::args().any(|a| a == "--background"),
+            bg,
+            start_hidden,
             resizing: None,
             extents: HashMap::new(),
             share_user: match &share_choice {
@@ -462,6 +653,8 @@ impl App {
             mark_cache: HashMap::new(),
             similar: None,
             ns_view: std::ptr::null_mut(),
+            hide_at_start,
+            details_card: None,
             drag_out_tried: false,
             print: None,
             list_pick: None,
@@ -559,7 +752,50 @@ impl App {
                 app.active.insert(p);
             }
         }
+        // The main window is known from the start (the menu bar asterisk may be clicked before
+        // the window ever drew), and a background start keeps it see-through until it is put away.
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(h) = cc.window_handle() {
+                if let RawWindowHandle::AppKit(a) = h.as_raw() {
+                    app.ns_view = a.ns_view.as_ptr();
+                    background::set_main_view(app.ns_view);
+                }
+            }
+        }
+        background::set_repaint_ctx(&cc.egui_ctx);
+        if app.screenshot.is_none() {
+            background::install();
+        }
+        if app.hide_at_start {
+            background::see_through_until_put_away();
+        }
+        // FONTCRAFT_TEST_MENUBAR=<log file>: the menu bar trips, timed, on this Mac (a developer
+        // check; FONTCRAFT_TEST_SWITCH_TO names the app the switch step brings forward).
+        #[cfg(target_os = "macos")]
+        if app.screenshot.is_none() {
+            if let Ok(log) = std::env::var("FONTCRAFT_TEST_MENUBAR") {
+                let probe = std::env::var("FONTCRAFT_TEST_SWITCH_TO").unwrap_or_else(|_| "com.apple.finder".into());
+                background::menu_bar_selftest(PathBuf::from(log), probe);
+            }
+        }
         app
+    }
+
+    /// Back to the menu bar (the menu bar asterisk, the shortcut, or closing the window while
+    /// FontCraft keeps running there). macOS: AppKit's own calls, at once (`background::hide_app`):
+    /// a full-screen window first leaves full screen, see-through, and is put away when macOS says
+    /// that is over. Elsewhere: the window library's commands.
+    fn go_to_menu_bar(&mut self, ctx: &egui::Context) {
+        background::set_in_background(true);
+        if cfg!(target_os = "macos") {
+            background::hide_app();
+            return;
+        }
+        if ctx.input(|i| i.viewport().fullscreen).unwrap_or(false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
     /// Fonts added or removed in a library or folder outside FontCraft appear by themselves: the
@@ -569,7 +805,9 @@ impl App {
     /// or dark look, checked every 2 seconds.
     fn follow_icon_look(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
-        if self.screenshot.is_some() || now - self.icon_checked < 2.0 {
+        // Back in the Dock from the menu bar: a new Dock tile, so the icon is set again at once.
+        let due = background::take_dock_icon_due();
+        if self.screenshot.is_some() || (!due && now - self.icon_checked < 2.0) {
             return;
         }
         self.icon_checked = now;
@@ -577,14 +815,14 @@ impl App {
             Some(t) => t == egui::Theme::Dark,
             None => appicon::system_is_dark(),
         };
-        if self.icon_dark == Some(dark) {
+        if self.icon_dark == Some(dark) && !due {
             return;
         }
         self.icon_dark = Some(dark);
         #[cfg(target_os = "macos")]
-        appicon::set_dock_icon(dark);
+        appicon::set_dock_icon_styled(dark, self.settings.widget_style, self.settings.accent);
         #[cfg(not(target_os = "macos"))]
-        ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(std::sync::Arc::new(appicon::window_icon(dark)))));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(std::sync::Arc::new(appicon::window_icon_styled(dark, self.settings.widget_style, self.settings.accent)))));
     }
 
     fn watch_libraries(&mut self, ctx: &egui::Context) {
@@ -1147,38 +1385,78 @@ impl App {
                             }
                         });
                         ui.add_space(12.0);
-                        egui::Grid::new("appearance").num_columns(2).spacing([16.0, 12.0]).show(ui, |ui| {
-                            heading(ui, t(K::Accent));
+                        egui::Grid::new("appearance").num_columns(2).spacing([16.0, 14.0]).show(ui, |ui| {
+                            let is_es = crate::i18n::LANGS[self.settings.lang].code == "es";
+                            heading(ui, if is_es { "Tema" } else { t(K::Accent) });
                             ui.horizontal(|ui| {
-                                // First the system's own accent colour (the default), with a ring so it reads
-                                // as "follow the system"; then VectorCraft's six accents, in its order.
+                                // 1. Multicolor (Rainbow swatch matching macOS System Settings)
                                 {
-                                    let col = settings::accent_color(settings::SYSTEM_ACCENT, pal.dark);
                                     let (r, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
-                                    ui.painter().circle_filled(r.center(), 9.0, col);
-                                    ui.painter().circle_stroke(r.center(), 6.0, Stroke::new(1.5_f32, Color32::WHITE.gamma_multiply(0.85)));
-                                    if self.settings.accent == settings::SYSTEM_ACCENT {
-                                        ui.painter().circle_stroke(r.center(), 11.5, Stroke::new(2.0_f32, col));
+                                    settings::paint_multicolor_swatch(ui.painter(), r.center(), 9.0);
+                                    if self.settings.accent == settings::MULTICOLOR {
+                                        ui.painter().circle_stroke(r.center(), 11.5, Stroke::new(2.0_f32, pal.accent));
+                                        ui.painter().circle_filled(r.center(), 3.0, Color32::WHITE);
                                     }
-                                    if resp.on_hover_text(t(K::System)).clicked() {
-                                        self.settings.accent = settings::SYSTEM_ACCENT;
+                                    if resp.on_hover_text("Multicolor").clicked() {
+                                        self.settings.accent = settings::MULTICOLOR;
+                                        self.logo = None;
                                     }
-                                    ui.add_space(6.0);
+                                    ui.add_space(4.0);
                                 }
+                                // 2. The 8 macOS theme colors (Azul, Púrpura, Rosa, Rojo, Naranja, Amarillo, Verde, Grafito)
                                 for (i, (name, light, dark)) in settings::ACCENTS.iter().enumerate() {
                                     let col = if pal.dark { *dark } else { *light };
                                     let (r, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
                                     ui.painter().circle_filled(r.center(), 9.0, col);
-                                    if self.settings.accent == i {
+                                    if self.settings.accent == i + 1 {
                                         ui.painter().circle_stroke(r.center(), 11.5, Stroke::new(2.0_f32, col));
                                         ui.painter().circle_filled(r.center(), 3.0, Color32::WHITE);
                                     }
-                                    if resp.on_hover_text(t(*name)).clicked() {
-                                        self.settings.accent = i;
+                                    let localized_name = match (is_es, i) {
+                                        (false, 0) => "Blue",
+                                        (false, 1) => "Purple",
+                                        (false, 2) => "Pink",
+                                        (false, 3) => "Red",
+                                        (false, 4) => "Orange",
+                                        (false, 5) => "Yellow",
+                                        (false, 6) => "Green",
+                                        (false, 7) => "Graphite",
+                                        _ => *name,
+                                    };
+                                    if resp.on_hover_text(localized_name).clicked() {
+                                        self.settings.accent = i + 1;
+                                        self.logo = None;
                                     }
                                 }
                             });
                             ui.end_row();
+
+                            // Estilo de iconos y widgets (macOS Sequoia / HIG)
+                            heading(ui, if is_es { "Estilo de iconos y widgets" } else { "Icon & widget style" });
+                            ui.horizontal(|ui| {
+                                for (st, label) in [
+                                    (settings::WidgetStyle::Default, if is_es { "Predeterminado" } else { "Default" }),
+                                    (settings::WidgetStyle::Dark, if is_es { "Oscuro" } else { "Dark" }),
+                                    (settings::WidgetStyle::Clear, if is_es { "Transparente" } else { "Clear" }),
+                                    (settings::WidgetStyle::Tinted, if is_es { "Teñido" } else { "Tinted" }),
+                                ] {
+                                    if ui.selectable_label(self.settings.widget_style == st, label).clicked() {
+                                        self.settings.widget_style = st;
+                                        self.logo = None;
+                                    }
+                                }
+                            });
+                            ui.end_row();
+
+                            // Botones radiales de confirmación ("Siempre" y "Automático")
+                            heading(ui, if is_es { "Confirmación" } else { "Confirmation" });
+                            ui.horizontal(|ui| {
+                                oslook::radio(ui, &mut self.settings.confirm_mode, settings::ConfirmMode::Auto, if is_es { "Automático" } else { "Automatic" });
+                                ui.add_space(14.0);
+                                oslook::radio(ui, &mut self.settings.confirm_mode, settings::ConfirmMode::Always, if is_es { "Siempre" } else { "Always" });
+                            });
+                            ui.end_row();
+
                             heading(ui, t(K::RowSpacing));
                             ui.horizontal(|ui| {
                                 for (i, name) in [t(K::Compact), t(K::Regular), t(K::Roomy)].iter().enumerate() {
@@ -1311,22 +1589,8 @@ impl App {
         let pal = self.pal;
         let lang = self.settings.lang;
         let t = move |k: K| i18n::tr(lang, k);
-        ui.add_space(14.0);
-        ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            // FontCraft's own icon (the person's drawing), light or dark like the window.
-            if self.logo.as_ref().is_none_or(|(d, _)| *d != pal.dark) {
-                let px = 64;
-                let img = egui::ColorImage::from_rgba_unmultiplied([px, px], &appicon::render(appicon::Kind::App, px, pal.dark));
-                self.logo = Some((pal.dark, ui.ctx().load_texture("fontcraft-logo", img, egui::TextureOptions::LINEAR)));
-            }
-            let (r, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
-            if let Some((_, tex)) = &self.logo {
-                ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-            }
-            ui.label(egui::RichText::new("FontCraft").strong().size(16.0).color(pal.ink));
-        });
-        ui.add_space(14.0);
+        // Finder's sidebar: a little room above the first section, inside the card.
+        ui.add_space(6.0);
         // Google Fonts and Adobe Fonts are sources (shown when switched on in Settings › Library).
         let mut sources = vec![
             (View::Source(Source::System), t(K::System)),
@@ -1362,131 +1626,44 @@ impl App {
             ));
         }
         for (n, (title, items)) in sections.into_iter().enumerate() {
-            // The section's header folds it away, with the system's own disclosure arrow.
+            // Finder's section title: grey, folds the section away, chevron at the right on hover.
             let key = ["library", "sources", "smart"].get(n).copied().unwrap_or("other");
             let open = !self.folded.contains(key);
-            if oslook::section_header(ui, title, open, pal.muted, |_| {}) {
+            if finder::section_header(ui, &pal, title, open, |_| {}) {
                 self.toggle_folded(key);
             }
             if !open {
-                ui.add_space(4.0);
+                ui.add_space(2.0);
                 continue;
             }
             for (view, label) in items {
                 let count = self.count(view);
-                let w = ui.available_width();
-                let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 26.0), Sense::click());
-                let r = r.shrink2(Vec2::new(4.0, 0.0));
                 let sel = self.view == view;
-                if let Some(c) = crate::settings::row_tint(pal.dark, sel, resp.hovered()) {
-                    ui.painter().rect_filled(r, 6.0, c);
-                }
-                let col = if sel { pal.accent } else { pal.ink };
-                let icol = if sel { pal.accent } else { pal.muted };
-                let c = r.left_center() + Vec2::new(16.0, 0.0);
-                let p = ui.painter();
-                let st = Stroke::new(1.3_f32, icol);
-                match view {
-                    View::All => {
-                        for (dx, dy) in [(-3.0, -3.0), (3.0, -3.0), (-3.0, 3.0), (3.0, 3.0)] {
-                            p.rect_filled(Rect::from_center_size(c + Vec2::new(dx, dy), Vec2::splat(4.5)), 1.0, icol);
-                        }
-                    }
-                    View::Favorites => {
-                        p.text(c, Align2::CENTER_CENTER, "★", FontId::proportional(15.0), icol);
-                    }
-                    View::Source(Source::Google) => gfonts::paint_mark(p, c, icol),
-                    View::Source(Source::Adobe) => {
-                        p.rect_stroke(Rect::from_center_size(c, Vec2::splat(13.0)), 3.0, st, eframe::egui::StrokeKind::Inside);
-                        p.text(c + Vec2::new(0.0, 0.5), Align2::CENTER_CENTER, "A", FontId::proportional(10.5), icol);
-                    }
-                    View::Source(_) => {
-                        p.rect_stroke(Rect::from_center_size(c, Vec2::new(13.0, 10.0)), 2.0, st, eframe::egui::StrokeKind::Inside);
-                        p.line_segment([c + Vec2::new(-3.0, 7.0), c + Vec2::new(3.0, 7.0)], st);
-                    }
-                    View::Mono => {
-                        for dy in [-4.0, 0.0, 4.0] {
-                            p.line_segment([c + Vec2::new(-6.0, dy), c + Vec2::new(6.0, dy)], st);
-                        }
-                    }
-                    View::Class(fonts::Class::Serif) | View::Class(fonts::Class::Sans) => {
-                        // A capital T, with little feet for "serif".
-                        let st = Stroke::new(1.6_f32, icol);
-                        p.line_segment([c + Vec2::new(-5.5, -5.5), c + Vec2::new(5.5, -5.5)], st);
-                        p.line_segment([c + Vec2::new(0.0, -5.5), c + Vec2::new(0.0, 5.5)], st);
-                        if view == View::Class(fonts::Class::Serif) {
-                            p.line_segment([c + Vec2::new(-2.8, 5.5), c + Vec2::new(2.8, 5.5)], st);
-                            p.line_segment([c + Vec2::new(-5.5, -5.5), c + Vec2::new(-5.5, -3.0)], st);
-                            p.line_segment([c + Vec2::new(5.5, -5.5), c + Vec2::new(5.5, -3.0)], st);
-                        }
-                    }
-                    View::Class(fonts::Class::Slab) => {
-                        // A capital T with heavy block feet.
-                        let st = Stroke::new(1.6_f32, icol);
-                        p.line_segment([c + Vec2::new(-5.5, -5.5), c + Vec2::new(5.5, -5.5)], st);
-                        p.line_segment([c + Vec2::new(0.0, -5.5), c + Vec2::new(0.0, 5.5)], st);
-                        p.rect_filled(Rect::from_center_size(c + Vec2::new(0.0, 5.0), Vec2::new(6.5, 2.4)), 0.0, icol);
-                        p.rect_filled(Rect::from_min_size(c + Vec2::new(-6.3, -6.5), Vec2::new(2.4, 4.0)), 0.0, icol);
-                        p.rect_filled(Rect::from_min_size(c + Vec2::new(3.9, -6.5), Vec2::new(2.4, 4.0)), 0.0, icol);
-                    }
-                    View::Class(fonts::Class::Blackletter) => {
-                        // Broken, angular strokes like a pen-drawn black letter.
-                        let st = Stroke::new(1.6_f32, icol);
-                        let pts = vec![
-                            c + Vec2::new(-5.5, 6.0), c + Vec2::new(-5.5, -3.0), c + Vec2::new(-2.5, -6.0), c + Vec2::new(0.0, -3.5),
-                            c + Vec2::new(2.5, -6.0), c + Vec2::new(5.5, -3.0), c + Vec2::new(5.5, 6.0),
-                        ];
-                        p.add(egui::Shape::line(pts, st));
-                        p.line_segment([c + Vec2::new(0.0, -3.5), c + Vec2::new(0.0, 4.0)], st);
-                    }
-                    View::Class(fonts::Class::Display) => {
-                        // A star: decorative type.
-                        let pts: Vec<Pos2> = (0..10)
-                            .map(|i| {
-                                let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
-                                c + Vec2::angled(a) * if i % 2 == 0 { 7.0 } else { 3.0 }
-                            })
-                            .collect();
-                        p.add(egui::Shape::closed_line(pts, Stroke::new(1.4_f32, icol)));
-                    }
-                    View::Class(fonts::Class::Script) => {
-                        let st = Stroke::new(1.6_f32, icol);
-                        let pts = [c + Vec2::new(-6.0, 5.0), c + Vec2::new(-1.0, -12.0), c + Vec2::new(3.0, 9.0), c + Vec2::new(6.5, -3.0)];
-                        p.add(egui::epaint::CubicBezierShape::from_points_stroke(pts, false, Color32::TRANSPARENT, st));
-                    }
-                    View::Class(_) => {
-                        p.circle_stroke(c, 6.0, st);
-                        let d = 3.2;
-                        p.add(egui::Shape::convex_polygon(
-                            vec![c + Vec2::new(0.0, -d), c + Vec2::new(d, 0.0), c + Vec2::new(0.0, d), c + Vec2::new(-d, 0.0)],
-                            icol,
-                            Stroke::NONE,
-                        ));
-                    }
-                    View::Lib(_) | View::LibSet(..) => {}
-                }
-                ui.painter().text(r.left_center() + Vec2::new(30.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), col);
+                let (resp, r, _) = finder::row(
+                    ui,
+                    &pal,
+                    finder::Row { icon: finder::Icon::Symbol(view_symbol(view)), label, count: Some(count), selected: sel, indent: 0.0, disclosure: None },
+                    |p, c, icol| paint_view_icon(p, view, c, icol),
+                );
                 // Google Fonts: a + to browse and download; Adobe Fonts: an arrow to fonts.adobe.com.
+                // Both show under the pointer, left of the count, as Finder shows a row's actions.
                 let service = matches!(view, View::Source(Source::Google) | View::Source(Source::Adobe));
-                let btn = Rect::from_center_size(r.right_center() - Vec2::new(40.0, 0.0), Vec2::splat(18.0));
-                if service {
+                let count_w = { let m = finder::metrics(); finder::text_width(ui, &count.to_string(), m.count, 0.0) };
+                let btn = Rect::from_center_size(Pos2::new(r.right() - 8.0 - count_w - 16.0, r.center().y), Vec2::splat(18.0));
+                if service && (resp.hovered() || sel) {
                     let hot = ui.rect_contains_pointer(btn);
                     let bc = if hot { pal.accent } else { pal.muted };
-                    let bst = Stroke::new(1.5_f32, bc);
                     if hot {
-                        ui.painter().rect_filled(btn, 4.0, pal.hover);
+                        ui.painter().rect_filled(btn, 5.0, pal.hover);
                     }
-                    let b = btn.center();
-                    if view == View::Source(Source::Google) {
+                    let sym = if view == View::Source(Source::Google) { "plus" } else { "arrow.up.right" };
+                    if !oslook::symbol(ui, sym, btn.center(), 11.0, bc) {
+                        let bst = Stroke::new(1.5_f32, bc);
+                        let b = btn.center();
                         ui.painter().line_segment([b - Vec2::new(4.5, 0.0), b + Vec2::new(4.5, 0.0)], bst);
                         ui.painter().line_segment([b - Vec2::new(0.0, 4.5), b + Vec2::new(0.0, 4.5)], bst);
-                    } else {
-                        ui.painter().line_segment([b + Vec2::new(-3.5, 3.5), b + Vec2::new(3.5, -3.5)], bst);
-                        ui.painter().line_segment([b + Vec2::new(-0.5, -3.5), b + Vec2::new(3.5, -3.5)], bst);
-                        ui.painter().line_segment([b + Vec2::new(3.5, -3.5), b + Vec2::new(3.5, 0.5)], bst);
                     }
                 }
-                ui.painter().text(r.right_center() - Vec2::new(10.0, 0.0), Align2::RIGHT_CENTER, count.to_string(), FontId::proportional(12.5), pal.muted);
                 let tip = match view {
                     View::Source(Source::Google) => Some(t(K::BrowseGoogle)),
                     View::Source(Source::Adobe) => Some(t(K::AdobeHint)),
@@ -1513,34 +1690,46 @@ impl App {
                     }
                 }
             }
-            ui.add_space(12.0);
+            ui.add_space(8.0);
         }
         self.sidebar_libraries(ui);
     }
 
+    /// The top bar, left to right: search (with the system's magnifying glass) | "Frase" and the
+    /// phrase's field | sentence, capitals, small letters and numbers | grid and list views |
+    /// size, target app, light/dark, print and settings (as before, at the right edge).
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let pal = self.pal;
         let lang = self.settings.lang;
         let t = move |k: K| i18n::tr(lang, k);
+        let es = lang == 1;
         ui.horizontal_centered(|ui| {
-            oslook::field(
+            // 1. Search fonts: the field with the system's magnifying glass drawn inside it.
+            let search = oslook::field(
                 ui,
                 egui::TextEdit::singleline(&mut self.search)
-                    .hint_text(format!("🔍 {}", t(K::SearchFonts)))
+                    .hint_text(t(K::SearchFonts))
                     .desired_width(180.0)
-                    .margin(Margin::symmetric(8, 5)),
+                    .margin(Margin { left: 26, right: 8, top: 5, bottom: 5 }),
             );
-            ui.separator();
-            for (name, text) in presets(lang) {
-                let on = self.preview == text;
-                if ui.selectable_label(on, name).clicked() {
-                    self.preview = text.to_string();
-                }
+            let glass = Pos2::new(search.rect.left() + 14.0, search.rect.center().y);
+            if !oslook::symbol(ui, "magnifyingglass", glass, 13.0, pal.muted) {
+                paint_magnifier(ui.painter(), glass, pal.muted);
             }
-            // The right-hand group is laid out first, from the right edge, so the settings button,
-            // the theme switch and the target app's icon always fit; the sample field takes what's left.
+            ui.separator();
+
+            // 2. "Frase": brings the phrase back; its field follows (laid out below, from the right,
+            //    so it takes the room the other groups leave).
+            let phrase = self.settings.default_preview.clone();
+            let on_phrase = self.preview == phrase;
+            let frase = ui.selectable_label(on_phrase, presets(lang)[0].0);
+            if frase.on_hover_text(if es { "Mostrar la frase" } else { "Show the phrase" }).clicked() {
+                self.preview = phrase.clone();
+            }
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Settings button.
+                // 6. The icons at the right edge, as they were: settings, print, light/dark, the app
+                //    FontCraft works with, and the sample size.
                 let (r, resp) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
                 if resp.hovered() || self.settings_open {
                     ui.painter().rect_filled(r, 6.0, pal.hover);
@@ -1549,7 +1738,6 @@ impl App {
                 if resp.on_hover_text(format!("{} (⌘,)", t(K::Settings))).clicked() {
                     self.settings_open = !self.settings_open;
                 }
-                // Print the catalog (next to Settings, drawn in the same style).
                 let (r, resp) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
                 if resp.hovered() || self.print.is_some() {
                     ui.painter().rect_filled(r, 6.0, pal.hover);
@@ -1558,7 +1746,6 @@ impl App {
                 if resp.on_hover_text(format!("{} (⌘P)", t(K::Print))).clicked() {
                     self.open_print();
                 }
-                // Quick light/dark switch.
                 let dark = self.pal.dark;
                 let (r, resp) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
                 if resp.hovered() {
@@ -1574,18 +1761,76 @@ impl App {
                 ui.separator();
                 ui.label(egui::RichText::new(format!("{} px", self.size.round())).color(pal.ink).monospace());
                 ui.label(egui::RichText::new("A").size(19.0).color(pal.muted));
-                ui.spacing_mut().slider_width = 120.0;
+                ui.spacing_mut().slider_width = 110.0;
                 ui.add(egui::Slider::new(&mut self.size, mechanics::SIZE_MIN..=mechanics::SIZE_MAX).show_value(false));
                 ui.label(egui::RichText::new("A").size(12.0).color(pal.muted));
                 ui.separator();
-                let w = (ui.available_width() - 6.0).max(60.0);
-                oslook::field(
+
+                // 5. Grid and list views (right to left: list, then grid).
+                let mode = self.settings.view_mode;
+                let list_tip = if es { "Lista detallada" } else { "Detailed list" };
+                if view_button(ui, &pal, mode == settings::ViewMode::List, list_tip, |p, c, col| {
+                    for dy in [-5.0, 0.0, 5.0] {
+                        p.rect_filled(Rect::from_center_size(c + Vec2::new(-6.0, dy), Vec2::splat(2.2)), 0.5, col);
+                        p.line_segment([c + Vec2::new(-2.0, dy), c + Vec2::new(6.5, dy)], Stroke::new(1.4, col));
+                    }
+                }) {
+                    self.settings.view_mode = settings::ViewMode::List;
+                    self.settings.save();
+                }
+                // Samples (in the middle, as Font Book places its sample view): each family's sample
+                // in a row, drawn as a large "A" beside lines of text.
+                let samples_tip = if es { "Muestras" } else { "Samples" };
+                if view_button(ui, &pal, mode == settings::ViewMode::Samples, samples_tip, |p, c, col| {
+                    p.text(c + Vec2::new(-3.5, 0.5), Align2::CENTER_CENTER, "A", FontId::proportional(15.0), col);
+                    for (dy, w) in [(-3.5, 5.0), (0.5, 5.0), (4.5, 3.5)] {
+                        p.line_segment([c + Vec2::new(2.5, dy), c + Vec2::new(2.5 + w, dy)], Stroke::new(1.4, col));
+                    }
+                }) {
+                    self.settings.view_mode = settings::ViewMode::Samples;
+                    self.settings.save();
+                }
+                let grid_tip = if es { "Cuadrícula" } else { "Grid" };
+                if view_button(ui, &pal, mode == settings::ViewMode::Grid, grid_tip, |p, c, col| {
+                    for (dx, dy) in [(-4.0, -4.0), (4.0, -4.0), (-4.0, 4.0), (4.0, 4.0)] {
+                        p.rect_filled(Rect::from_center_size(c + Vec2::new(dx, dy), Vec2::splat(5.0)), 1.0, col);
+                    }
+                }) {
+                    self.settings.view_mode = settings::ViewMode::Grid;
+                    self.settings.save();
+                }
+                ui.separator();
+
+                // 4. Sentence, capitals, small letters and numbers (right to left).
+                let tips: [&str; 5] = if es {
+                    ["", "Oración", "Mayúsculas", "Minúsculas", "Números"]
+                } else {
+                    ["", "Sentence", "Capitals", "Small letters", "Numbers"]
+                };
+                for (i, (name, text)) in presets(lang).into_iter().enumerate().skip(1).rev() {
+                    let on = self.preview == text;
+                    if ui.selectable_label(on, name).on_hover_text(tips[i]).clicked() {
+                        self.preview = text.to_string();
+                    }
+                }
+                ui.separator();
+
+                // 3. The phrase's field: shows the sample, and what the person types becomes the
+                //    phrase "Frase" brings back.
+                let w = (ui.available_width() - 6.0).max(80.0);
+                let resp = oslook::field(
                     ui,
                     egui::TextEdit::singleline(&mut self.preview)
                         .hint_text(t(K::TypeToPreview))
                         .desired_width(w)
                         .margin(Margin::symmetric(8, 5)),
                 );
+                if resp.changed() && !presets(lang).iter().skip(1).any(|(_, p)| *p == self.preview) {
+                    self.settings.default_preview = self.preview.clone();
+                }
+                if resp.lost_focus() {
+                    self.settings.save();
+                }
             });
         });
     }
@@ -1602,6 +1847,14 @@ impl App {
     }
 
     fn list(&mut self, ui: &mut egui::Ui) {
+        if self.settings.view_mode == settings::ViewMode::List {
+            self.list_table(ui);
+            return;
+        }
+        if self.settings.view_mode == settings::ViewMode::Grid {
+            self.grid_view(ui);
+            return;
+        }
         let mut list_action: Option<menus::MenuAction> = None;
         let mut native_row: Option<Row> = None;
         let pal = self.pal;
@@ -1764,9 +2017,6 @@ impl App {
                     if matches!(row, Row::Family(_)) && n_faces > 1 {
                         self.toggle_expanded(family);
                     }
-                    if let Some(app) = self.target_app() {
-                        self.apply_to_app(app, face);
-                    }
                 }
                 // Right-click: the font menu, as the system's own menu where it offers one.
                 let row = *row;
@@ -1793,13 +2043,299 @@ impl App {
             self.run_menu_action(a);
         }
     }
+
+    fn family_date(&self, family: usize) -> String {
+        let face_idx = self.lib.families[family].default_face;
+        let face = &self.lib.faces[face_idx];
+        let file = &self.lib.files[face.file];
+        if let Ok(meta) = std::fs::metadata(&file.path) {
+            if let Ok(time) = meta.created().or_else(|_| meta.modified()) {
+                if let Ok(duration) = time.duration_since(std::time::UNIX_EPOCH) {
+                    let (y, m, d) = days_to_ymd(duration.as_secs() / 86400);
+                    return format!("{y:04}-{m:02}-{d:02}");
+                }
+            }
+        }
+        "-".to_string()
+    }
+
+    fn list_table(&mut self, ui: &mut egui::Ui) {
+        let mut list_action: Option<menus::MenuAction> = None;
+        let mut native_row: Option<Row> = None;
+        let pal = self.pal;
+        let lang = self.settings.lang;
+        let t = move |k: K| i18n::tr(lang, k);
+        let rows = self.rows();
+        if rows.is_empty() {
+            ui.centered_and_justified(|ui| {
+                ui.label(egui::RichText::new(t(K::NoMatch)).size(17.0).color(pal.muted));
+            });
+            return;
+        }
+
+        let total_w = ui.available_width();
+        let col_icon = 54.0_f32;
+        let col_name = 170.0_f32;
+        let col_styles = 80.0_f32;
+        let col_fmt = 65.0_f32;
+        let col_class = 110.0_f32;
+        let col_date = 100.0_f32;
+        let fixed_w = col_icon + col_name + col_styles + col_fmt + col_class + col_date;
+        let col_preview = (total_w - fixed_w).max(180.0);
+
+        // Header
+        let (hdr_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, 28.0), Sense::hover());
+        ui.painter().rect_filled(hdr_rect, 0.0, pal.status);
+        ui.painter().line_segment([hdr_rect.left_bottom(), hdr_rect.right_bottom()], Stroke::new(1.0, pal.line));
+
+        let x_icon = hdr_rect.left();
+        let x_name = x_icon + col_icon;
+        let x_preview = x_name + col_name;
+        let x_styles = x_preview + col_preview;
+        let x_fmt = x_styles + col_styles;
+        let x_class = x_fmt + col_fmt;
+        let x_date = x_class + col_class;
+
+        let hdr_y = hdr_rect.center().y;
+        let hdr_font = FontId::proportional(11.5);
+        let hdr_col = pal.muted;
+        ui.painter().text(Pos2::new(x_icon + col_icon / 2.0, hdr_y), Align2::CENTER_CENTER, if lang == 1 { "Estado" } else { "Status" }, hdr_font.clone(), hdr_col);
+        ui.painter().text(Pos2::new(x_name + 4.0, hdr_y), Align2::LEFT_CENTER, if lang == 1 { "Nombre" } else { "Name" }, hdr_font.clone(), hdr_col);
+        ui.painter().text(Pos2::new(x_preview + 4.0, hdr_y), Align2::LEFT_CENTER, if lang == 1 { "Vista previa" } else { "Preview" }, hdr_font.clone(), hdr_col);
+        ui.painter().text(Pos2::new(x_styles + 4.0, hdr_y), Align2::LEFT_CENTER, if lang == 1 { "Estilos" } else { "Styles" }, hdr_font.clone(), hdr_col);
+        ui.painter().text(Pos2::new(x_fmt + 4.0, hdr_y), Align2::LEFT_CENTER, if lang == 1 { "Formato" } else { "Format" }, hdr_font.clone(), hdr_col);
+        ui.painter().text(Pos2::new(x_class + 4.0, hdr_y), Align2::LEFT_CENTER, if lang == 1 { "Clasificación" } else { "Classification" }, hdr_font.clone(), hdr_col);
+        ui.painter().text(Pos2::new(x_date + 4.0, hdr_y), Align2::LEFT_CENTER, if lang == 1 { "Fecha de adición" } else { "Date Added" }, hdr_font, hdr_col);
+
+        let row_h = 44.0_f32;
+        let total_h = rows.len() as f32 * row_h;
+        let ctx = ui.ctx().clone();
+
+        egui::ScrollArea::vertical().auto_shrink(false).show_viewport(ui, |ui, viewport| {
+            ui.set_min_height(total_h);
+            let origin = ui.max_rect().min;
+            let w = ui.available_width();
+
+            for (k, row) in rows.iter().enumerate() {
+                let top = k as f32 * row_h;
+                if top + row_h < viewport.min.y || top > viewport.max.y {
+                    continue;
+                }
+                let rect = Rect::from_min_size(Pos2::new(origin.x, origin.y + top), Vec2::new(w, row_h));
+                let resp = ui.interact(rect, ui.scope_id().with(("list-row", k)), Sense::click());
+                let (family, face, indent) = match *row {
+                    Row::Family(f) => (f, self.lib.families[f].default_face, 0.0),
+                    Row::Face(f, face) => (f, face, 20.0),
+                };
+                let sel = self.selected == Some(*row);
+                let p = ui.painter().clone();
+                if sel {
+                    p.rect_filled(rect, 0.0, pal.accent_soft);
+                } else if resp.hovered() {
+                    p.rect_filled(rect, 0.0, pal.hover);
+                } else if matches!(row, Row::Face(..)) {
+                    p.rect_filled(rect, 0.0, pal.face_bg);
+                }
+                p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, pal.line));
+
+                let row_cy = rect.center().y;
+                let (fam_name, n_faces, fam_class, fam_mono) = {
+                    let fam = &self.lib.families[family];
+                    (fam.name.clone(), fam.faces.len(), fam.class, fam.monospaced)
+                };
+
+                // 1. Icon (disclosure chevron for multi-face families, padlock or asterisk)
+                let tri_c = Pos2::new(rect.left() + 8.0, row_cy);
+                let act_c = Pos2::new(rect.left() + 26.0, row_cy);
+                if matches!(row, Row::Family(_)) && n_faces > 1 {
+                    oslook::disclosure(ui, tri_c, self.expanded.contains(&family), pal.muted);
+                    let tri_rect = Rect::from_center_size(tri_c, Vec2::splat(16.0));
+                    if resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| tri_rect.expand(2.0).contains(p)) {
+                        self.toggle_expanded(family);
+                    }
+                }
+                self.activation_control(ui, *row, act_c);
+
+                // 2. Name
+                let name_x = x_name + 4.0 + indent;
+                match *row {
+                    Row::Family(_) => {
+                        p.text(Pos2::new(name_x, row_cy), Align2::LEFT_CENTER, &fam_name, FontId::proportional(13.5), pal.ink);
+                    }
+                    Row::Face(_, face) => {
+                        p.text(Pos2::new(name_x, row_cy), Align2::LEFT_CENTER, &self.lib.faces[face].style, FontId::proportional(13.0), pal.muted);
+                    }
+                }
+
+                // 3. Specimen Preview
+                let text = self.preview_text(family);
+                let preview_sz = (self.size * 0.7).clamp(16.0, 26.0);
+                let p_max_w = (col_preview - 12.0).max(10.0);
+                let (tex, size, _drew, _missing) = self.texture(&ctx, face, &text, preview_sz, p_max_w);
+                if let Some(tex) = tex {
+                    let scale = (p_max_w / size.x).min(32.0 / size.y).min(1.0);
+                    let draw_size = size * scale;
+                    let preview_rect = Rect::from_min_size(
+                        Pos2::new(x_preview + 6.0, row_cy - draw_size.y / 2.0),
+                        draw_size,
+                    );
+                    p.image(
+                        tex.id(),
+                        preview_rect,
+                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                        pal.ink,
+                    );
+                }
+
+                // 4. Styles count
+                if matches!(row, Row::Family(_)) {
+                    let st_str = if n_faces == 1 {
+                        if lang == 1 { "1 estilo".to_string() } else { "1 style".to_string() }
+                    } else {
+                        if lang == 1 { format!("{n_faces} estilos") } else { format!("{n_faces} styles") }
+                    };
+                    p.text(Pos2::new(x_styles + 4.0, row_cy), Align2::LEFT_CENTER, st_str, FontId::proportional(12.0), pal.muted);
+                } else {
+                    p.text(Pos2::new(x_styles + 4.0, row_cy), Align2::LEFT_CENTER, "-", FontId::proportional(12.0), pal.muted);
+                }
+
+                // 5. Format badge / label
+                let fmt = {
+                    let f_obj = &self.lib.faces[face];
+                    let file = &self.lib.files[f_obj.file];
+                    fonts::format_label(&file.data, f_obj.index)
+                };
+                p.text(Pos2::new(x_fmt + 4.0, row_cy), Align2::LEFT_CENTER, fmt, FontId::proportional(11.5), pal.muted);
+
+                // 6. Classification
+                let class_str = class_label(lang, fam_class, fam_mono);
+                p.text(Pos2::new(x_class + 4.0, row_cy), Align2::LEFT_CENTER, class_str, FontId::proportional(12.0), pal.muted);
+
+                // 7. Date added
+                let date_str = self.family_date(family);
+                p.text(Pos2::new(x_date + 4.0, row_cy), Align2::LEFT_CENTER, date_str, FontId::proportional(11.5), pal.muted);
+
+                if resp.clicked() {
+                    self.selected = Some(*row);
+                }
+                if resp.double_clicked() {
+                    if let Row::Family(f) = *row {
+                        if self.lib.families[f].faces.len() > 1 {
+                            self.toggle_expanded(f);
+                        }
+                    }
+                }
+                let row = *row;
+                if nativemenu::available() {
+                    if resp.secondary_clicked() {
+                        self.selected = Some(row);
+                        native_row = Some(row);
+                    }
+                } else {
+                    resp.context_menu(|ui| {
+                        self.selected = Some(row);
+                        if let Some(a) = self.font_menu(ui, row) {
+                            list_action = Some(a);
+                        }
+                    });
+                }
+            }
+        });
+
+        if let Some(row) = native_row {
+            let (items, acts) = self.font_menu_native(row);
+            self.open_native_menu(items, acts);
+        }
+        if let Some(a) = list_action {
+            self.run_menu_action(a);
+        }
+    }
 }
 
 impl eframe::App for App {
+    // TEMP-TEST-RCLICK: synthetic right-click (x,y,frame) for a crash test; removed after testing.
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if let Ok(spec) = std::env::var("FONTCRAFT_TEST_HOVER") {
+            let v: Vec<f32> = spec.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+            if let [x, y] = v[..] {
+                raw.events.push(egui::Event::PointerMoved(egui::pos2(x, y)));
+            }
+        }
+        let Ok(spec) = std::env::var("FONTCRAFT_TEST_RCLICK") else { return };
+        let v: Vec<f32> = spec.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+        let [x, y, f] = v[..] else { return };
+        let (pos, f) = (egui::pos2(x, y), f as u64);
+        let n = self.frame as u64;
+        if n == f {
+            raw.events.push(egui::Event::PointerMoved(pos));
+        } else if n == f + 2 || n == f + 4 {
+            raw.events.push(egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed: n == f + 2, modifiers: egui::Modifiers::NONE });
+            eprintln!("TEST: right {} at {pos:?} frame {n}", if n == f + 2 { "down" } else { "up" });
+        }
+    }
+
     /// When FontCraft quits: the "turn off when FontCraft quits" options.
     #[cfg(not(target_os = "android"))]
     fn on_exit(&mut self) {
         self.autoact_quit();
+    }
+
+    /// Runs before every pass, and alone while the window is put away in the menu bar or covered
+    /// by other windows (eframe 0.37 runs no ui then): FontCraft keeps working in the background —
+    /// the menu bar asterisk, turning fonts off when their app or document closes, and the Missing
+    /// Fonts window, which is drawn even then (RequestPaintWhileHidden).
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.screenshot.is_some() {
+            return;
+        }
+        // Menu bar icon and "open FontCraft" shortcut.
+        let keep = self.settings.background || self.start_hidden;
+        self.bg.sync(ctx, keep, &self.settings.hotkey);
+        // Background start: put away the window eframe shows after its first frame.
+        if self.hide_at_start {
+            if cfg!(target_os = "macos") {
+                if background::main_window_up() {
+                    self.hide_at_start = false;
+                    background::hide_app();
+                } else {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                }
+            } else if self.frame >= 1 {
+                self.hide_at_start = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            } else {
+                ctx.request_repaint();
+            }
+        }
+        // Windows and Linux: clicking the menu bar icon (or the shortcut) opens the window full
+        // screen; clicking it again while the window is in front puts it away.
+        if self.bg.wake.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            background::set_in_background(false);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+        if self.bg.sleep.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.go_to_menu_bar(ctx);
+        }
+        // With "keep running in the menu bar", closing the window only puts it away.
+        if keep && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.go_to_menu_bar(ctx);
+        }
+        // The menu bar asterisk follows whether the window is in front (checked twice a second).
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        if ctx.input(|i| i.viewport().visible()).unwrap_or(true) {
+            // The window is up: ui() does the rest itself.
+            return;
+        }
+        self.autoact_start();
+        self.autoact_tick(ctx);
+        self.missing_tick();
+        if self.missing.open && self.missing.bring_front > 0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+            ctx.request_repaint();
+        }
     }
 
     /// Android builds eframe with its OpenGL (glow) renderer, whose `on_exit` gets the GL context.
@@ -1818,6 +2354,7 @@ impl eframe::App for App {
                     RawWindowHandle::AppKit(a) => {
                         self.ns_view = a.ns_view.as_ptr();
                         nativemenu::set_window(self.ns_view as usize);
+                        background::set_main_view(self.ns_view);
                     }
                     RawWindowHandle::Win32(w) => nativemenu::set_window(w.hwnd.get() as usize),
                     _ => {}
@@ -1891,25 +2428,8 @@ impl eframe::App for App {
 
         self.google_sync(ctx);
 
-        // Menu bar icon and "open FontCraft" shortcut (not while taking test pictures).
-        if self.screenshot.is_none() {
-            self.bg.sync(ctx, self.settings.background || self.start_hidden, &self.settings.hotkey);
-            if self.start_hidden && self.frame == 3 {
-                background::hide_app();
-            }
-            // Clicking the menu bar icon (or the shortcut) opens the window full screen.
-            if self.bg.wake.swap(false, std::sync::atomic::Ordering::SeqCst) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
-            }
-            // With "keep running in the menu bar", closing the window only hides it.
-            if ctx.input(|i| i.viewport().close_requested()) && (self.settings.background || self.start_hidden) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                background::hide_app();
-            }
-        }
+        // The menu bar icon and the "open FontCraft" shortcut are looked after in `logic`, which
+        // also runs while the window is put away.
         self.autoact_start();
         self.autoact_tick(ctx);
         // First start: when FontCraft isn't allowed to work with other apps yet, macOS shows its
@@ -1942,20 +2462,26 @@ impl eframe::App for App {
             self.autoact.settings_seen = false;
         }
 
-        let mut left_open = self.left_open;
-        let left = egui::Panel::left("sidebar")
-            .exact_size(self.settings.left_w)
-            .resizable(false)
-            .frame(egui::Frame::NONE.fill(pal.sidebar).inner_margin(Margin::symmetric(8, 0)))
-            .show_collapsible(root, &mut left_open, |ui| {
-                egui::ScrollArea::vertical().id_salt("sidebar-scroll").auto_shrink(false).show(ui, |ui| self.sidebar(ui));
-            });
-        let left_edge = left.map(|r| r.response.rect.right()).unwrap_or(ctx.content_rect().left());
-
         egui::Panel::top("toolbar")
             .exact_size(50.0)
             .frame(egui::Frame::NONE.fill(pal.panel).inner_margin(Margin::symmetric(14, 0)).stroke(Stroke::new(1.0_f32, pal.line)))
             .show(root, |ui| self.toolbar(ui));
+
+        let mut left_open = self.left_open;
+        let left = egui::Panel::left("sidebar")
+            .exact_size(self.settings.left_w)
+            .resizable(false)
+            // Finder's sidebar on macOS 26: a card floating over the window, inset from its edges.
+            .frame(egui::Frame::NONE.fill(pal.panel).inner_margin(Margin::same(finder::CARD_INSET)))
+            .show_collapsible(root, &mut left_open, |ui| {
+                let card = ui.max_rect();
+                finder::paint_card(ui, card, &pal);
+                let inner = card.shrink2(Vec2::new(finder::CARD_PAD, 0.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
+                    egui::ScrollArea::vertical().id_salt("sidebar-scroll").auto_shrink(false).show(ui, |ui| self.sidebar(ui));
+                });
+            });
+        let left_edge = left.as_ref().map(|r| r.response.rect.right()).unwrap_or(ctx.content_rect().left());
 
         let shown = self.count(self.view);
         let styles: usize = (0..self.lib.families.len())
@@ -1985,8 +2511,15 @@ impl eframe::App for App {
             let right = egui::Panel::right("details")
                 .exact_size(self.settings.right_w)
                 .resizable(false)
-                .frame(egui::Frame::NONE.fill(pal.panel).inner_margin(Margin::symmetric(16, 0)).stroke(Stroke::new(1.0_f32, pal.line)))
-                .show_collapsible(root, &mut right_open, |ui| self.details(ui));
+                // The same floating card and colour as the sidebar (Finder's look on macOS 26).
+                .frame(egui::Frame::NONE.fill(pal.panel).inner_margin(Margin::same(finder::CARD_INSET)))
+                .show_collapsible(root, &mut right_open, |ui| {
+                    let card = ui.max_rect();
+                    self.details_card = Some(card);
+                    finder::paint_card(ui, card, &pal);
+                    let inner = card.shrink2(Vec2::new(DETAILS_PAD, 2.0));
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| self.details(ui));
+                });
             right_edge = Some(right.map(|r| r.response.rect.left()).unwrap_or(ctx.content_rect().right()));
         }
 
@@ -2164,6 +2697,13 @@ fn main() -> eframe::Result<()> {
         background::set_login_item(args.get(i + 1).map(|v| v == "on").unwrap_or(false));
         return Ok(());
     }
+    // Developer aid: FontCraft's PhotoCraft channel against a headless PhotoCraft, then quit.
+    if let Some(i) = args.iter().position(|a| a == "--test-photocraft-channel") {
+        if let (Some(port), Some(token)) = (args.get(i + 1), args.get(i + 2)) {
+            autoact::photocraft::selftest(port, token);
+        }
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--test-clipboard") {
         autoact::clipboard_selftest();
         return Ok(());
@@ -2285,15 +2825,32 @@ fn main() -> eframe::Result<()> {
             ..WgpuSetupCreateNew::without_display_handle()
         });
     }
-    // macOS: the app doesn't come to the front either.
+    // macOS: the app doesn't come to the front either. Started in the background (the menu bar
+    // asterisk kept): only in the menu bar, out of the Dock, until the asterisk is clicked, as
+    // RightFont at login (Accessory, 0x1000bee24).
     #[cfg(target_os = "macos")]
-    if screenshot.is_some() {
-        options.event_loop_builder = Some(Box::new(|b| {
-            use winit::platform::macos::EventLoopBuilderExtMacOS;
-            b.with_activate_ignoring_other_apps(false);
-        }));
+    {
+        let hidden = starts_in_background(&Settings::load(), screenshot.is_some());
+        if screenshot.is_some() || hidden {
+            options.event_loop_builder = Some(Box::new(move |b| {
+                use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+                b.with_activate_ignoring_other_apps(false);
+                if hidden {
+                    b.with_activation_policy(ActivationPolicy::Accessory);
+                }
+            }));
+        }
     }
     eframe::run_native("FontCraft", options, Box::new(move |cc| Ok(Box::new(App::new(cc, screenshot)))))
+}
+
+/// FontCraft starts in the background, only its menu bar asterisk showing, when "Keep FontCraft in
+/// the menu bar" is on or it was started at login (--background); never for test pictures, and not
+/// on Android or iPadOS (no menu bar there).
+fn starts_in_background(settings: &Settings, screenshot: bool) -> bool {
+    !screenshot
+        && !cfg!(any(target_os = "android", target_os = "ios"))
+        && (settings.background || std::env::args().any(|a| a == "--background"))
 }
 
 /// Android: the entry point the system calls (built as a library by `android/` and

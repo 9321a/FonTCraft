@@ -226,43 +226,86 @@ pub fn pick_fonts_or_folders() -> Vec<PathBuf> {
     v
 }
 
-/// The system's Open panel for "Folder / Library": a folder, or a FontCraft library (.fcl). On
-/// macOS a library is a package, which a folder picker can't select, so the panel takes files too
-/// (a package is chosen like a file) and anything that isn't a folder is refused.
+/// The system's folder/library picker. On macOS, uses NSOpenPanel beginWithCompletionHandler:
+/// which runs completely asynchronously without modal runloop reentrancy, preventing winit SIGABRT.
+/// On other platforms, executes on a background thread.
 #[cfg(target_os = "macos")]
-pub fn pick_folder_or_library(start: Option<&Path>) -> Option<PathBuf> {
+pub fn pick_folder_or_library_async(start: Option<PathBuf>, cb: impl FnOnce(Option<PathBuf>) + Send + 'static) {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
-    unsafe {
+    use block2::RcBlock;
+
+    let run = || unsafe {
         let panel: Retained<AnyObject> = msg_send![class!(NSOpenPanel), openPanel];
         let _: () = msg_send![&panel, setCanChooseFiles: true];
         let _: () = msg_send![&panel, setCanChooseDirectories: true];
         let _: () = msg_send![&panel, setAllowsMultipleSelection: false];
         let _: () = msg_send![&panel, setCanCreateDirectories: true];
-        if let Some(dir) = start.filter(|d| d.is_dir()) {
+        let _: () = msg_send![&panel, setTreatsFilePackagesAsDirectories: false];
+        if let Some(dir) = start.as_deref().filter(|d| d.is_dir()) {
             let ns = objc2_foundation::NSString::from_str(&dir.to_string_lossy());
             let url: *mut AnyObject = msg_send![class!(NSURL), fileURLWithPath: &*ns, isDirectory: true];
             if !url.is_null() {
                 let _: () = msg_send![&panel, setDirectoryURL: url];
             }
         }
-        let answer: isize = msg_send![&panel, runModal];
-        if answer != 1 {
-            return None;
+        let panel_clone = panel.clone();
+        let cb_cell = std::sync::Mutex::new(Some(cb));
+        let block = RcBlock::new(move |res: isize| {
+            let mut path_opt = None;
+            if res == 1 {
+                let url: *mut AnyObject = msg_send![&*panel_clone, URL];
+                if !url.is_null() {
+                    let path: *mut AnyObject = msg_send![url, path];
+                    if !path.is_null() {
+                        let c: *const std::os::raw::c_char = msg_send![path, UTF8String];
+                        if !c.is_null() {
+                            let p = PathBuf::from(std::ffi::CStr::from_ptr(c).to_string_lossy().to_string());
+                            if p.is_dir() {
+                                path_opt = Some(p);
+                            }
+                        }
+                    }
+                }
+            }
+            if let Ok(mut lock) = cb_cell.lock() {
+                if let Some(f) = lock.take() {
+                    f(path_opt);
+                }
+            }
+        });
+        let _: () = msg_send![&*panel, beginWithCompletionHandler: &*block];
+    };
+    let _ = objc2::exception::catch(std::panic::AssertUnwindSafe(run));
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "android"), not(target_os = "ios")))]
+pub fn pick_folder_or_library_async(start: Option<PathBuf>, cb: impl FnOnce(Option<PathBuf>) + Send + 'static) {
+    std::thread::spawn(move || {
+        let mut dlg = rfd::FileDialog::new();
+        if let Some(dir) = start.as_deref().filter(|d| d.is_dir()) {
+            dlg = dlg.set_directory(dir);
         }
-        let url: *mut AnyObject = msg_send![&panel, URL];
-        if url.is_null() {
-            return None;
-        }
-        let path: *mut AnyObject = msg_send![url, path];
-        if path.is_null() {
-            return None;
-        }
-        let c: *const std::os::raw::c_char = msg_send![path, UTF8String];
-        let p = PathBuf::from(std::ffi::CStr::from_ptr(c).to_string_lossy().to_string());
-        p.is_dir().then_some(p)
+        let res = dlg.pick_folder();
+        cb(res);
+    });
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn pick_folder_or_library_async(_start: Option<PathBuf>, cb: impl FnOnce(Option<PathBuf>) + Send + 'static) {
+    cb(None);
+}
+
+/// Fallback synchronous folder picker (safe on non-macOS platforms).
+#[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
+#[allow(dead_code)]
+pub fn pick_folder_or_library(start: Option<&Path>) -> Option<PathBuf> {
+    let mut dlg = rfd::FileDialog::new();
+    if let Some(dir) = start.filter(|d| d.is_dir()) {
+        dlg = dlg.set_directory(dir);
     }
+    dlg.pick_folder()
 }
 
 /// On mobile (Android, iOS) libraries are accessed via sandbox paths.
@@ -270,16 +313,6 @@ pub fn pick_folder_or_library(start: Option<&Path>) -> Option<PathBuf> {
 #[allow(dead_code)]
 pub fn pick_folder_or_library(_start: Option<&Path>) -> Option<PathBuf> {
     None
-}
-
-/// Elsewhere a FontCraft library is a folder, so the system's folder picker chooses it.
-#[cfg(all(not(target_os = "macos"), not(target_os = "android"), not(target_os = "ios")))]
-pub fn pick_folder_or_library(start: Option<&Path>) -> Option<PathBuf> {
-    let mut dlg = rfd::FileDialog::new();
-    if let Some(dir) = start.filter(|d| d.is_dir()) {
-        dlg = dlg.set_directory(dir);
-    }
-    dlg.pick_folder()
 }
 
 /// Marks a FontCraft library folder as FontCraft's on systems where it is a plain folder, so the

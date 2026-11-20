@@ -2,11 +2,10 @@
 //! font-request source on the main run loop (-[RFFontActivator startFontRequestRunLoopSource],
 //! 0x10004ee84: `CTFontManagerCreateFontRequestRunLoopSource(0, block)` then `CFRunLoopAddSource` on
 //! `CFRunLoopGetMain`). When any app opens a document or picks a font that isn't installed, the system
-//! asks FontCraft with the font's name (`NSFontNameAttribute`) and the asking process; a font of the
-//! catalog (a library or Google Fonts) with that PostScript, full or family name is turned on at once
-//! and handed back, so the app shows it without restarting. Names FontCraft doesn't have are kept for
-//! the Missing Fonts window. Turned-on fonts stay on while the asking app runs (Auto Activation's
-//! records) and go off when it quits.
+//! asks FontCraft with the font's name (`NSFontNameAttribute`) and the asking process. The name goes
+//! to the Missing Fonts window, where the person turns the catalog's font on or picks a replacement
+//! (nothing is turned on without that warning). Fonts turned on there stay on while the asking app
+//! runs (Auto Activation's records) and go off when it quits.
 
 // Only macOS has font requests; elsewhere the answers are never made.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -17,10 +16,9 @@ use std::sync::{Mutex, OnceLock};
 
 /// What happened with one request, for the app to pick up each frame.
 pub enum Answer {
-    /// Turned on for the app: (files, app's bundle id, app's name, font name).
-    Activated(Vec<PathBuf>, String, String, String),
-    /// Not in FontCraft's catalog: (font name, app's name).
-    Missing(String, String),
+    /// An app asked for a font that isn't on: (font name, app's bundle id, app's name). The person
+    /// decides in the Missing Fonts window (turn it on, or replace it).
+    Requested(String, String, String),
 }
 
 struct State {
@@ -87,7 +85,6 @@ mod mac {
     #[link(name = "CoreText", kind = "framework")]
     unsafe extern "C" {
         fn CTFontManagerCreateFontRequestRunLoopSource(order: isize, block: &block2::Block<dyn Fn(Ptr, i32) -> Ptr>) -> Ptr;
-        fn CTFontManagerCreateFontDescriptorsFromURL(url: Ptr) -> Ptr;
         static kCTFontNameAttribute: Ptr;
     }
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -96,17 +93,8 @@ mod mac {
         fn CFRunLoopAddSource(rl: Ptr, source: Ptr, mode: Ptr);
         static kCFRunLoopCommonModes: Ptr;
         fn CFDictionaryGetValue(dict: Ptr, key: Ptr) -> Ptr;
-        fn CFArrayCreateMutable(alloc: Ptr, cap: isize, callbacks: Ptr) -> Ptr;
-        fn CFArrayAppendArray(arr: Ptr, other: Ptr, range: CFRange);
-        fn CFArrayGetCount(arr: Ptr) -> isize;
-        fn CFRelease(p: Ptr);
-        static kCFTypeArrayCallBacks: c_void;
-    }
-
-    #[repr(C)]
-    struct CFRange {
-        location: isize,
-        length: isize,
+        fn CFGetTypeID(cf: Ptr) -> usize;
+        fn CFStringGetTypeID() -> usize;
     }
 
     fn cfstring_to_string(s: Ptr) -> Option<String> {
@@ -137,46 +125,46 @@ mod mac {
         }
     }
 
-    /// One request: the font's name → its files turned on → their descriptors for the system.
+    /// One request, as RightFont answers it (its request block at 0x10004f10c): the font's name is
+    /// read only when it really is a string (`CFGetTypeID == CFStringGetTypeID`), the work is handed
+    /// on, and the system gets nothing back (`mov x0, #0x0` at 0x10004f318). The system treats
+    /// whatever comes back as font file URLs and issues sandbox extensions for them
+    /// (XTIssueSandboxExtensionsForURLs); handing it font descriptors made it crash FontCraft as soon
+    /// as Affinity opened a document with a font that wasn't on. The font is turned on right after,
+    /// off this callback (RightFont: -[RFFontActivator handleRequestFonts], 0x10004f89c), and the
+    /// asking app sees it through the system's "fonts changed" notice, as it sees any new font.
     fn answer(attrs: Ptr, pid: i32) -> Ptr {
-        let name = unsafe { cfstring_to_string(CFDictionaryGetValue(attrs, kCTFontNameAttribute)) }.unwrap_or_default();
-        let out = unsafe { CFArrayCreateMutable(std::ptr::null(), 0, &kCFTypeArrayCallBacks as *const c_void) };
+        if attrs.is_null() {
+            return std::ptr::null();
+        }
+        let value = unsafe { CFDictionaryGetValue(attrs, kCTFontNameAttribute) };
+        if value.is_null() || unsafe { CFGetTypeID(value) != CFStringGetTypeID() } {
+            return std::ptr::null();
+        }
+        let name = cfstring_to_string(value).unwrap_or_default();
         if name.is_empty() || is_system_ui(&name) {
-            return out;
+            return std::ptr::null();
         }
         let (bundle, app) = app_of(pid);
-        match lookup(&name) {
-            Some(files) => {
-                let mut on = Vec::new();
-                for f in &files {
-                    if crate::activate::set(f, true) {
-                        on.push(f.clone());
-                    }
-                    let url = core_foundation::url::CFURL::from_path(f, false);
-                    if let Some(url) = url {
-                        let descs = unsafe { CTFontManagerCreateFontDescriptorsFromURL(core_foundation::base::TCFType::as_concrete_TypeRef(&url) as Ptr) };
-                        if !descs.is_null() {
-                            unsafe {
-                                let n = CFArrayGetCount(descs);
-                                CFArrayAppendArray(out, descs, CFRange { location: 0, length: n });
-                                CFRelease(descs);
-                            }
-                        }
-                    }
-                }
-                if let Ok(mut s) = state().lock() {
-                    s.answers.push(Answer::Activated(on, bundle, app, name));
-                }
-            }
-            None => {
-                if let Ok(mut s) = state().lock() {
-                    if s.told.insert(format!("{bundle}\u{1f}{}", name.to_lowercase())) {
-                        s.answers.push(Answer::Missing(name, app));
-                    }
-                }
+        handle(name, bundle, app, pid);
+        std::ptr::null()
+    }
+
+    /// Hands a request to the person: nothing is turned on here. The Missing Fonts window opens
+    /// with the name (in the catalog: "Activate"; not in it: "Replace with…"), as the person asked
+    /// (Affinity must not get fonts turned on without that warning). Each name is handled once per
+    /// run of the asking app (keyed by its process id, as RightFont keeps the names it handled per
+    /// target app, 0x10004f89c), so a font the person turns off again isn't asked for, or turned on,
+    /// again while that app stays open; when the app is opened again it can ask again.
+    fn handle(name: String, bundle: String, app: String, pid: i32) {
+        if !crate::autoact::is_supported_app(&bundle, &app) {
+            return;
+        }
+        if let Ok(mut s) = state().lock() {
+            if s.told.insert(format!("{pid}\u{1f}{}", name.to_lowercase())) {
+                s.answers.push(Answer::Requested(name, bundle, app));
             }
         }
-        out
     }
 
     /// Registers the request source once (main thread).

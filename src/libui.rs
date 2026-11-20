@@ -3,7 +3,7 @@
 use crate::i18n::{self, K};
 use crate::libs::{library_from, paint_family, paint_folder, paint_library, LibKind, NewLib};
 use crate::{fcl, libscan, oslook, App, View};
-use eframe::egui::{self, Align2, FontId, Margin, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, FontId, Margin, Rect, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
 
 impl App {
@@ -21,22 +21,22 @@ impl App {
         let key = if kind == LibKind::Fcl { "libraries" } else { "folders" };
         let open = !self.folded.contains(key);
         let mut add = false;
-        // The section's header, with the system's disclosure arrow and "+".
-        let clicked = oslook::section_header(ui, title, open, pal.muted, |ui| {
-            {
-                ui.add_space(6.0);
-                // + : a new FontCraft library, or a folder from the computer.
-                let (r, resp) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
-                if resp.hovered() {
-                    ui.painter().rect_filled(r, 5.0, pal.hover);
-                }
+        // Finder's section title, with "+" at the right: a new FontCraft library, or a folder.
+        let clicked = crate::finder::section_header(ui, &pal, title, open, |ui| {
+            let (r, resp) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
+            let hot = resp.hovered();
+            if hot {
+                ui.painter().rect_filled(r, 5.0, pal.hover);
+            }
+            let col = if hot { pal.accent } else { crate::finder::title_ink(&pal) };
+            if !oslook::symbol(ui, "plus", r.center(), 11.0, col) {
                 let c = r.center();
-                let st = Stroke::new(1.6_f32, if resp.hovered() { pal.accent } else { pal.muted });
+                let st = Stroke::new(1.6_f32, col);
                 ui.painter().line_segment([c - Vec2::new(5.0, 0.0), c + Vec2::new(5.0, 0.0)], st);
                 ui.painter().line_segment([c - Vec2::new(0.0, 5.0), c + Vec2::new(0.0, 5.0)], st);
-                if resp.on_hover_text(plus_tip).clicked() {
-                    add = true;
-                }
+            }
+            if resp.on_hover_text(plus_tip).clicked() {
+                add = true;
             }
         });
         if add {
@@ -45,7 +45,7 @@ impl App {
             self.toggle_folded(key);
         }
         if !open {
-            ui.add_space(4.0);
+            ui.add_space(2.0);
             return;
         }
         let mut menu_action: Option<crate::menus::MenuAction> = None;
@@ -54,32 +54,26 @@ impl App {
         for i in indices {
             let view = View::Lib(i);
             let count = self.count(view);
-            let w = ui.available_width();
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 26.0), Sense::click());
-            let r = r.shrink2(Vec2::new(4.0, 0.0));
             let sel = self.view == view;
-            if let Some(c) = crate::settings::row_tint(pal.dark, sel, resp.hovered()) {
-                ui.painter().rect_filled(r, 6.0, c);
-            }
             let has_sets = !self.libraries[i].sets.is_empty();
             let open = !self.lib_collapsed.contains(&i);
-            // The system's disclosure arrow on the left (the same one as the section headers), then
-            // the library's or folder's icon and the name, each with room of its own.
-            let tri = Rect::from_center_size(r.left_center() + Vec2::new(9.0, 0.0), Vec2::splat(16.0));
-            if has_sets {
-                oslook::disclosure(ui, tri.center(), open, pal.muted);
-            }
-            // A library has its own icon (books); a folder keeps the folder icon.
-            if kind == LibKind::Fcl {
-                paint_library(ui.painter(), r.left_center() + Vec2::new(27.0, 0.0), if sel { pal.accent } else { pal.muted });
-            } else {
-                paint_folder(ui.painter(), r.left_center() + Vec2::new(27.0, 0.0), if sel { pal.accent } else { pal.muted });
-            }
-            // The count first, then the name shortened with "…" so it never runs into it.
-            let count_rect = ui.painter().text(r.right_center() - Vec2::new(10.0, 0.0), Align2::RIGHT_CENTER, count.to_string(), FontId::proportional(12.5), pal.muted);
-            let room = (count_rect.left() - 8.0 - (r.left() + 42.0)).max(20.0);
-            let name = fit_text(ui, &self.libraries[i].name, FontId::proportional(14.0), room);
-            ui.painter().text(r.left_center() + Vec2::new(42.0, 0.0), Align2::LEFT_CENTER, name, FontId::proportional(14.0), if sel { pal.accent } else { pal.ink });
+            let name = self.libraries[i].name.clone();
+            // Finder's row: the fold arrow (when it has lists), the library's books or the folder,
+            // the name shortened with "…" so it never runs into the count.
+            let (resp, _, tri) = crate::finder::row(
+                ui,
+                &pal,
+                crate::finder::Row {
+                    icon: crate::finder::Icon::Own(if kind == LibKind::Fcl { "library" } else { "folder" }),
+                    label: &name,
+                    count: Some(count),
+                    selected: sel,
+                    indent: if has_sets { 0.0 } else { 14.0 },
+                    disclosure: if has_sets { Some(open) } else { None },
+                },
+                |p, c, col| if kind == LibKind::Fcl { paint_library(p, c, col) } else { paint_folder(p, c, col) },
+            );
+            let tri = tri.unwrap_or(Rect::NOTHING);
             let path = self.libraries[i].path.display().to_string();
             let resp = resp.on_hover_text(path);
             if resp.clicked() {
@@ -108,33 +102,30 @@ impl App {
                 for s in 0..self.libraries[i].sets.len() {
                     let view = View::LibSet(i, s);
                     let count = self.count(view);
-                    let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 24.0), Sense::click());
-                    let r = r.shrink2(Vec2::new(4.0, 0.0));
                     let sel = self.view == view;
-                    if let Some(c) = crate::settings::row_tint(pal.dark, sel, resp.hovered()) {
-                        ui.painter().rect_filled(r, 6.0, c);
-                    }
-                    let col = if sel { pal.accent } else { pal.muted };
-                    // Nested lists sit further in, like their folders.
-                    let indent = (self.libraries[i].sets[s].depth.min(6) as f32) * 12.0;
-                    let c = r.left_center() + Vec2::new(42.0 + indent, 0.0);
-                    if kind == LibKind::Fcl {
-                        paint_family(ui.painter(), c, col);
-                    } else {
-                        ui.painter().rect_stroke(Rect::from_center_size(c, Vec2::new(10.0, 8.0)), 1.5, Stroke::new(1.2_f32, col), eframe::egui::StrokeKind::Inside);
-                    }
+                    // Nested lists sit further in, like their folders; long names end in "…" and
+                    // the full name shows on hover.
+                    let indent = 12.0 + (self.libraries[i].sets[s].depth.min(6) as f32) * 12.0;
                     let set_name = self.libraries[i].sets[s].name.clone();
-                    // Long names are shortened with "…" to fit; the full name shows on hover.
-                    let max_chars = ((r.width() - 80.0 - indent) / 6.5).max(6.0) as usize;
-                    let label = if set_name.chars().count() > max_chars {
-                        let mut short: String = set_name.chars().take(max_chars - 1).collect();
-                        short.push('…');
-                        short
-                    } else {
-                        set_name.clone()
-                    };
-                    ui.painter().text(r.left_center() + Vec2::new(54.0 + indent, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), if sel { pal.accent } else { pal.ink });
-                    ui.painter().text(r.right_center() - Vec2::new(10.0, 0.0), Align2::RIGHT_CENTER, count.to_string(), FontId::proportional(12.0), pal.muted);
+                    let (resp, _, _) = crate::finder::row(
+                        ui,
+                        &pal,
+                        crate::finder::Row {
+                            icon: crate::finder::Icon::Own(if kind == LibKind::Fcl { "family" } else { "set" }),
+                            label: &set_name,
+                            count: Some(count),
+                            selected: sel,
+                            indent,
+                            disclosure: None,
+                        },
+                        |p, c, col| {
+                            if kind == LibKind::Fcl {
+                                paint_family(p, c, col)
+                            } else {
+                                p.rect_stroke(Rect::from_center_size(c, Vec2::new(10.0, 8.0)), 1.5, Stroke::new(1.2_f32, col), eframe::egui::StrokeKind::Inside);
+                            }
+                        },
+                    );
                     let resp = resp.on_hover_text(set_name);
                     if resp.clicked() {
                         self.view = view;
@@ -167,6 +158,17 @@ impl App {
     /// it if wanted; saved as ~/FontCraft/<name>.fcl with its fonts in A–Z folders), or a folder
     /// from the computer (its subfolders become lists).
     pub(crate) fn new_library_window(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.folder_picker_rx {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+            if let Ok(p_opt) = rx.try_recv() {
+                if let Some(p) = p_opt {
+                    if let Some(nl) = &mut self.new_lib {
+                        nl.path = p.display().to_string();
+                    }
+                }
+                self.folder_picker_rx = None;
+            }
+        }
         let Some(mut nl) = self.new_lib.take() else { return };
         let pal = self.pal;
         let lang = self.settings.lang;
@@ -200,14 +202,21 @@ impl App {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             // The field takes the room the button leaves, so neither leaves the window.
-                            let button_w = ui.spacing().button_padding.x * 2.0 + 14.0 + ui.fonts_mut(|f| f.layout_no_wrap(t(K::ChooseBtn).to_string(), egui::FontId::proportional(oslook::metrics().text), egui::Color32::WHITE).size().x);
+                            let button_w = ui.spacing().button_padding.x * 2.0 + 14.0 + ui.painter().layout_no_wrap(t(K::ChooseBtn).to_string(), egui::FontId::proportional(oslook::metrics().text), egui::Color32::WHITE).size().x;
                             let field_w = (ui.available_width() - button_w - ui.spacing().item_spacing.x).max(80.0);
                             oslook::field(ui, egui::TextEdit::singleline(&mut nl.path).desired_width(field_w).hint_text("/Users/…/Fonts").margin(Margin::symmetric(8, 5)));
                             // The system's picker: a folder, or a FontCraft library (.fcl, a package on macOS).
                             #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
-                            if ui.button(t(K::ChooseBtn)).clicked() {
-                                if let Some(p) = crate::fcl::pick_folder_or_library(exists.then_some(folder)) {
-                                    nl.path = p.display().to_string();
+                            {
+                                let is_picking = self.folder_picker_rx.is_some();
+                                let btn_text = if is_picking { "…" } else { t(K::ChooseBtn) };
+                                if ui.add_enabled(!is_picking, egui::Button::new(btn_text)).clicked() {
+                                    let (tx, rx) = std::sync::mpsc::channel();
+                                    let start = exists.then_some(folder).map(|p| p.to_path_buf());
+                                    crate::fcl::pick_folder_or_library_async(start, move |p| {
+                                        let _ = tx.send(p);
+                                    });
+                                    self.folder_picker_rx = Some(rx);
                                 }
                             }
                         });

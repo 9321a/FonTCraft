@@ -50,6 +50,53 @@ pub const SIZE_MAX: f32 = 160.0;
 /// latest version of RightFont." (string 0x100285eb3, shown from 0x100019e58).
 pub const UNTESTED_MACOS_MAJOR: u32 = 28;
 
+/// Going back to the menu bar from full screen: the longest wait for macOS to say the window has
+/// left full screen (windowDidExitFullScreen; its animation takes about half a second) before the
+/// window is hidden anyway. Estimated; RightFont has no full-screen window (its panel only hides).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const LEAVE_FULLSCREEN_MAX_S: f64 = 3.0;
+
+/// An app that reads the installed fonts only when it opens (TraceDraw: fontdb scans the font
+/// folders once, "system fonts read in 144 ms" in its log, no folder watcher, no CoreText
+/// notice) shows a font FontCraft turned on while it was open only after it is reopened: the
+/// font stays this long after the app closes, so reopening it lists the font; then it goes, as
+/// it does when FontCraft quits. Estimated.
+pub const REOPEN_GRACE_S: f64 = 60.0;
+
+/// The longest wait for DesignCraft to answer a command script over its control channel
+/// (it answered at once in the tests; a stuck app mustn't hold FontCraft's worker). Estimated.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const CHANNEL_WAIT_S: f64 = 5.0;
+
+/// FontCraft opened again (Finder, Dock, Launchpad, Spotlight) while it works in the menu bar
+/// shows its window, as RightFont does (-[RFAppDelegate applicationShouldHandleReopen:
+/// hasVisibleWindows:], 0x1000db7fc) — but not within this long of starting or of a trip to or
+/// from the menu bar, when macOS activates the app on its own. Estimated (RightFont gets the reopen
+/// event itself; FontCraft's window library doesn't pass it on, so the activation is watched).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const REOPEN_SETTLE_MS: u64 = 2500;
+
+/// FontCraft opened again from the Finder while in the menu bar: how long macOS is left to finish
+/// bringing it forward before its window comes up and goes full screen (a full-screen move started
+/// at once was given up by macOS in the test on this Mac). Estimated.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const REOPEN_DELAY_S: f64 = 0.35;
+
+/// Out of the menu bar, full screen: first look this long after the window comes up, then every
+/// twice this long, FULLSCREEN_LOOKS times; asked of macOS at most FULLSCREEN_ASKS times; a move
+/// macOS started and never finished counts as given up after FULLSCREEN_MOVE_STALE_MS (the move
+/// itself took 0.6 to 0.8 s on this Mac: willEnter 3846 ms, didEnter 4646 ms; once macOS sent
+/// willEnter at 11815 ms and never didEnter, and the second ask at 14044 ms finished at 14655 ms).
+/// Estimated.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const FULLSCREEN_LOOK_S: f64 = 0.15;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const FULLSCREEN_LOOKS: u32 = 12;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const FULLSCREEN_ASKS: u32 = 2;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub const FULLSCREEN_MOVE_STALE_MS: u64 = 1500;
+
 /// The running macOS version ("26.7.3"), or None elsewhere.
 pub fn macos_version() -> Option<String> {
     if !cfg!(target_os = "macos") {

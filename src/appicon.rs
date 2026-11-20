@@ -6,6 +6,7 @@
 //! The running app uses the version that matches the system's light/dark look.
 
 use std::path::Path;
+use crate::settings::WidgetStyle;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -38,18 +39,45 @@ fn render_svg(svg: &str, s: usize, margin: f32) -> Vec<u8> {
     out
 }
 
-/// The app icon on its own container, adapted to the design language of each host OS:
-/// - macOS: rounded squircle on Apple's icon grid (824/1024, 22.5% radius), soft drop shadow, gradient.
-/// - iOS: squircle container (1000/1024, 22.5% radius), clean surface without drop shadow.
+/// The outline every macOS app icon shares since Big Sur (and still on macOS 26): a superellipse
+/// |x/a|^5 + |y/b|^5 = 1 filling the tile, whose corners curve continuously into the sides as
+/// Apple's icon template draws them (the tile is 824 of the icon's 1024 points). The earlier
+/// hand-made curve here cut the top corners off, so the icon no longer matched other apps.
+fn apple_squircle(x: f32, y: f32, w: f32, h: f32) -> Option<resvg::tiny_skia::Path> {
+    use resvg::tiny_skia::PathBuilder;
+    const N: f32 = 5.0;
+    let (a, b) = (w / 2.0, h / 2.0);
+    let (cx, cy) = (x + a, y + b);
+    let steps = 720;
+    let mut pb = PathBuilder::new();
+    for i in 0..steps {
+        let t = i as f32 / steps as f32 * std::f32::consts::TAU;
+        let (c, s) = (t.cos(), t.sin());
+        let px = cx + a * c.signum() * c.abs().powf(2.0 / N);
+        let py = cy + b * s.signum() * s.abs().powf(2.0 / N);
+        if i == 0 {
+            pb.move_to(px, py);
+        } else {
+            pb.line_to(px, py);
+        }
+    }
+    pb.close();
+    pb.finish()
+}
+
+/// The app icon on its container, strictly following Apple HIG and host OS design languages:
+/// - macOS: continuous curvature squircle on Apple's icon grid (824/1024), authentic dual drop shadows,
+///   refined Apple Dark Mode plate, specular edge highlight, matching Finder and Safari Web Apps.
+/// - iOS: continuous squircle (1000/1024), clean surface without drop shadow.
 /// - Windows: Fluent Design (880/1024, 12% radius), clean modern elevation.
 /// - Android: Material Design adaptive squircle/circle (900/1024, 26% radius).
 /// - Linux: GNOME / FreeDesktop HIG (860/1024, 18% radius).
-/// Scalable up to 512x512 pixels.
-fn render_tile(s: usize, dark: bool) -> Vec<u8> {
+fn render_tile(s: usize, dark: bool, style: WidgetStyle, accent_idx: usize) -> Vec<u8> {
     use resvg::tiny_skia::{Color, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point, SpreadMode, Stroke, Transform};
     let sf = s as f32;
     let Some(mut pix) = Pixmap::new(s as u32, s as u32) else { return vec![0; s * s * 4] };
 
+    let is_apple = cfg!(target_os = "macos") || cfg!(target_os = "ios");
     let (body_ratio, radius_ratio, has_shadow, shadow_layers) = if cfg!(target_os = "macos") {
         (824.0 / 1024.0, 0.225, true, 8)
     } else if cfg!(target_os = "ios") {
@@ -62,11 +90,13 @@ fn render_tile(s: usize, dark: bool) -> Vec<u8> {
         (860.0 / 1024.0, 0.180, true, 4)
     };
 
-    let body = sf * body_ratio;
-    let x0 = (sf - body) / 2.0;
-    let y0 = if has_shadow { x0 - sf * 0.008 } else { x0 };
+    let body = (sf * body_ratio).round();
+    let half_h = body / 2.0;
+    let cy = sf / 2.0;
+    let x0 = ((sf - body) / 2.0).round();
+    let y0 = ((sf - body) / 2.0).round();
+
     let rounded = |x: f32, y: f32, w: f32, h: f32, r: f32| {
-        // A rounded rectangle with circular corners (k: the cubic handle for a quarter circle).
         let k = 0.5523 * r;
         let mut pb = PathBuilder::new();
         pb.move_to(x + r, y);
@@ -82,40 +112,159 @@ fn render_tile(s: usize, dark: bool) -> Vec<u8> {
         pb.finish()
     };
     let radius = body * radius_ratio;
-    // Shadow: a few widening, fading layers a little below the tile when the host OS uses drop shadows.
+
+    let make_shape = |x: f32, y: f32, w: f32, h: f32, r: f32| {
+        if is_apple {
+            apple_squircle(x, y, w, h)
+        } else {
+            rounded(x, y, w, h, r)
+        }
+    };
+
+    // Shadow: authentic Apple macOS drop shadow matching Safari Web Apps and Finder.
     if has_shadow && s >= 32 {
-        for i in 0..shadow_layers {
-            let grow = sf * 0.0035 * i as f32;
-            if let Some(p) = rounded(x0 - grow, y0 + sf * 0.012 - grow + sf * 0.004, body + 2.0 * grow, body + 2.0 * grow, radius + grow) {
-                let mut paint = Paint::default();
-                paint.set_color(Color::from_rgba8(0, 0, 0, if dark { 16 } else { 10 }));
-                paint.anti_alias = true;
-                pix.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+        if is_apple {
+            // Apple's icon template shadow: straight down 12 of 1024 points, softly blurred (about
+            // 28 points) at about 30 % black, built from stacked outlines growing and fading out.
+            let layers = 10;
+            for i in 0..layers {
+                let k = i as f32 / (layers - 1) as f32;
+                let grow = sf * (14.0 / 1024.0) * k;
+                let y_shift = sf * (12.0 / 1024.0);
+                if let Some(p) = apple_squircle(x0 - grow, y0 + y_shift - grow, body + 2.0 * grow, body + 2.0 * grow) {
+                    let mut paint = Paint::default();
+                    let alpha = (if dark { 30.0 } else { 20.0 } * (1.0 - k * 0.85)).round() as u8;
+                    paint.set_color(Color::from_rgba8(0, 0, 0, alpha.max(1)));
+                    paint.anti_alias = true;
+                    pix.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+                }
+            }
+        } else {
+            for i in 0..shadow_layers {
+                let grow = sf * 0.0035 * i as f32;
+                if let Some(p) = rounded(x0 - grow, y0 + sf * 0.012 - grow + sf * 0.004, body + 2.0 * grow, body + 2.0 * grow, radius + grow) {
+                    let mut paint = Paint::default();
+                    paint.set_color(Color::from_rgba8(0, 0, 0, if dark { 16 } else { 10 }));
+                    paint.anti_alias = true;
+                    pix.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+                }
             }
         }
     }
-    let Some(tile) = rounded(x0, y0, body, body, radius) else { return vec![0; s * s * 4] };
-    let (top, bottom, edge) = if dark {
-        (Color::from_rgba8(0x3a, 0x3a, 0x3c, 255), Color::from_rgba8(0x1c, 0x1c, 0x1e, 255), Color::from_rgba8(255, 255, 255, 38))
-    } else {
-        (Color::from_rgba8(0xff, 0xff, 0xff, 255), Color::from_rgba8(0xe9, 0xe9, 0xee, 255), Color::from_rgba8(0, 0, 0, 30))
+
+    let tile = make_shape(x0, y0, body, body, radius);
+    let Some(tile) = tile else { return vec![0; s * s * 4] };
+
+    let is_dark_tile = match style {
+        WidgetStyle::Dark => true,
+        WidgetStyle::Default => dark,
+        WidgetStyle::Clear => dark,
+        WidgetStyle::Tinted => true,
     };
+
+    let (top, bottom, edge) = match style {
+        WidgetStyle::Tinted => {
+            let acc = crate::settings::accent_color(accent_idx, true);
+            let (ar, ag, ab) = (acc.r() as f32, acc.g() as f32, acc.b() as f32);
+            (
+                Color::from_rgba8((ar * 0.22).round() as u8, (ag * 0.22).round() as u8, (ab * 0.22).round() as u8, 255),
+                Color::from_rgba8((ar * 0.08).round() as u8, (ag * 0.08).round() as u8, (ab * 0.08).round() as u8, 255),
+                Color::from_rgba8((ar * 0.7).round() as u8, (ag * 0.7).round() as u8, (ab * 0.7).round() as u8, 140),
+            )
+        }
+        WidgetStyle::Clear => {
+            if dark {
+                (Color::from_rgba8(48, 48, 56, 190), Color::from_rgba8(20, 20, 26, 170), Color::from_rgba8(255, 255, 255, 90))
+            } else {
+                (Color::from_rgba8(255, 255, 255, 215), Color::from_rgba8(230, 230, 236, 175), Color::from_rgba8(255, 255, 255, 150))
+            }
+        }
+        _ => {
+            if is_dark_tile {
+                // macOS HIG System Dark plate (Finder / Safari web apps style)
+                (Color::from_rgba8(0x2c, 0x2c, 0x2e, 255), Color::from_rgba8(0x1c, 0x1c, 0x1e, 255), Color::from_rgba8(255, 255, 255, 28))
+            } else if is_apple {
+                // The light plate of macOS 26's own white icons: white at the top easing to a
+                // pale grey at the bottom, with a hairline edge so it holds on light backgrounds.
+                (Color::from_rgba8(0xf6, 0xf6, 0xf8, 255), Color::from_rgba8(0xe4, 0xe4, 0xe8, 255), Color::from_rgba8(0, 0, 0, 30))
+            } else {
+                // Apple satin pearl plate
+                (Color::from_rgba8(0xff, 0xff, 0xff, 255), Color::from_rgba8(0xe8, 0xe8, 0xee, 255), Color::from_rgba8(0, 0, 0, 20))
+            }
+        }
+    };
+
     let mut paint = Paint::default();
     paint.anti_alias = true;
-    if let Some(g) = LinearGradient::new(Point::from_xy(0.0, y0), Point::from_xy(0.0, y0 + body), vec![GradientStop::new(0.0, top), GradientStop::new(1.0, bottom)], SpreadMode::Pad, Transform::identity()) {
+    if let Some(g) = LinearGradient::new(Point::from_xy(0.0, cy - half_h), Point::from_xy(0.0, cy + half_h), vec![GradientStop::new(0.0, top), GradientStop::new(1.0, bottom)], SpreadMode::Pad, Transform::identity()) {
         paint.shader = g;
     }
     pix.fill_path(&tile, &paint, FillRule::Winding, Transform::identity(), None);
-    let mut line = Paint::default();
-    line.anti_alias = true;
-    line.set_color(edge);
-    pix.stroke_path(&tile, &line, &Stroke { width: (sf / 512.0).max(0.5), ..Stroke::default() }, Transform::identity(), None);
-    // The drawing, inside the tile with room around it (scaling up to 512x512).
-    let inner = (body * 0.74).round().max(1.0) as usize;
-    let art = render_svg(if dark { APP_DARK } else { APP_LIGHT }, inner, 0.0);
+
+    {
+        let mut line = Paint::default();
+        line.anti_alias = true;
+        line.set_color(edge);
+        pix.stroke_path(&tile, &line, &Stroke { width: (sf / 512.0).max(0.75), ..Stroke::default() }, Transform::identity(), None);
+    }
+
+    // macOS 26's glass edge, as its own icons show it (Calculator, Notes at 1024 px): a light rim
+    // about 7 of 1024 points wide just inside the outline, brightest at the top left and fading
+    // towards the bottom right, with a softer glow inward. Drawn inside the tile only.
+    if is_apple && s >= 32 {
+        if let Some(mask) = {
+            let mut m = resvg::tiny_skia::Mask::new(s as u32, s as u32);
+            if let Some(m) = m.as_mut() {
+                m.fill_path(&tile, FillRule::Winding, true, Transform::identity());
+            }
+            m
+        } {
+            let (strong, weak) = if is_dark_tile { (110u8, 26u8) } else { (235u8, 90u8) };
+            let rim = |width: f32, a_top: u8, a_bottom: u8, pix: &mut Pixmap| {
+                let mut paint = Paint::default();
+                paint.anti_alias = true;
+                if let Some(g) = LinearGradient::new(
+                    Point::from_xy(x0, y0),
+                    Point::from_xy(x0 + body, y0 + body),
+                    vec![
+                        GradientStop::new(0.0, Color::from_rgba8(255, 255, 255, a_top)),
+                        GradientStop::new(0.55, Color::from_rgba8(255, 255, 255, ((a_top as u16 + a_bottom as u16) / 3) as u8)),
+                        GradientStop::new(1.0, Color::from_rgba8(255, 255, 255, a_bottom)),
+                    ],
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                ) {
+                    paint.shader = g;
+                }
+                // Twice the width: the outer half falls outside the tile and is masked away.
+                pix.stroke_path(&tile, &paint, &Stroke { width: width * 2.0, ..Stroke::default() }, Transform::identity(), Some(&mask));
+            };
+            rim(sf * (16.0 / 1024.0), strong / 5, weak / 5, &mut pix);
+            rim(sf * (7.0 / 1024.0), strong / 2, weak / 2, &mut pix);
+            rim(sf * (2.5 / 1024.0), strong, weak, &mut pix);
+            // The plate's bottom edge darkens a little, as light falls from above.
+            let mut shade = Paint::default();
+            shade.anti_alias = true;
+            if let Some(g) = LinearGradient::new(
+                Point::from_xy(0.0, y0 + body * 0.82),
+                Point::from_xy(0.0, y0 + body),
+                vec![GradientStop::new(0.0, Color::from_rgba8(0, 0, 0, 0)), GradientStop::new(1.0, Color::from_rgba8(0, 0, 0, if is_dark_tile { 40 } else { 14 }))],
+                SpreadMode::Pad,
+                Transform::identity(),
+            ) {
+                shade.shader = g;
+            }
+            pix.stroke_path(&tile, &shade, &Stroke { width: sf * (10.0 / 1024.0), ..Stroke::default() }, Transform::identity(), Some(&mask));
+        }
+    }
+
+    // The drawing sits inside the tile with room on every side, as other apps' symbols do (about
+    // two thirds of the tile), so it never reaches the rounded edge.
+    let inner = (body * if is_apple { 0.66 } else { 0.74 }).round().max(1.0) as usize;
+    let art = render_svg(if is_dark_tile { APP_DARK } else { APP_LIGHT }, inner, 0.0);
     if let Some(art_pix) = resvg::tiny_skia::Pixmap::from_vec(premultiply(art), resvg::tiny_skia::IntSize::from_wh(inner as u32, inner as u32).unwrap_or(resvg::tiny_skia::IntSize::from_wh(1, 1).unwrap())) {
         let ax = ((sf - inner as f32) / 2.0).round() as i32;
-        let ay = (y0 + (body - inner as f32) / 2.0).round() as i32;
+        let ay = ((sf - inner as f32) / 2.0).round() as i32;
         pix.draw_pixmap(ax, ay, art_pix.as_ref(), &resvg::tiny_skia::PixmapPaint::default(), Transform::identity(), None);
     }
     let mut out = vec![0u8; s * s * 4];
@@ -139,9 +288,14 @@ fn premultiply(mut rgba: Vec<u8>) -> Vec<u8> {
 
 /// One icon, `s` pixels square, as RGBA bytes.
 pub fn render(kind: Kind, s: usize, dark: bool) -> Vec<u8> {
+    render_styled(kind, s, dark, WidgetStyle::Default, 0)
+}
+
+/// One icon with specific widget style and accent color.
+pub fn render_styled(kind: Kind, s: usize, dark: bool, style: WidgetStyle, accent_idx: usize) -> Vec<u8> {
     match (kind, dark) {
-        // The app: its drawing on its own container tile, light or dark.
-        (Kind::App, d) => render_tile(s, d),
+        // The app: its drawing on its own container tile, styled for host OS and theme settings.
+        (Kind::App, d) => render_tile(s, d, style, accent_idx),
         // A document icon fills the height, as document icons do.
         (Kind::Document, false) => render_svg(FCL_LIGHT, s, 0.02),
         (Kind::Document, true) => render_svg(FCL_DARK, s, 0.02),
@@ -150,18 +304,29 @@ pub fn render(kind: Kind, s: usize, dark: bool) -> Vec<u8> {
 
 /// The window/dock icon matching the system's look, rendered at full 512x512 resolution.
 pub fn window_icon(dark: bool) -> eframe::egui::IconData {
+    window_icon_styled(dark, WidgetStyle::Default, 0)
+}
+
+/// The window/dock icon with custom widget style and accent color.
+pub fn window_icon_styled(dark: bool, style: WidgetStyle, accent_idx: usize) -> eframe::egui::IconData {
     let s = 512;
-    eframe::egui::IconData { rgba: render(Kind::App, s, dark), width: s as u32, height: s as u32 }
+    eframe::egui::IconData { rgba: render_styled(Kind::App, s, dark, style, accent_idx), width: s as u32, height: s as u32 }
 }
 
 /// Puts the light or dark tile in the Dock while FontCraft runs (macOS: NSApp's application icon
 /// image; eframe sets it once at start and winit can't change it afterwards). Main thread only.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 pub fn set_dock_icon(dark: bool) {
+    set_dock_icon_styled(dark, WidgetStyle::Default, 0);
+}
+
+#[cfg(target_os = "macos")]
+pub fn set_dock_icon_styled(dark: bool, style: WidgetStyle, accent_idx: usize) {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
-    let bytes = png(&render(Kind::App, 512, dark), 512);
+    let bytes = png(&render_styled(Kind::App, 512, dark, style, accent_idx), 512);
     let run = || unsafe {
         let data = objc2_foundation::NSData::with_bytes(&bytes);
         let img: Option<Retained<AnyObject>> = msg_send![msg_send![class!(NSImage), alloc], initWithData: &*data];
@@ -222,7 +387,7 @@ fn ico(pictures: &[(usize, Vec<u8>)]) -> Vec<u8> {
 /// Writes every icon file into `dir`.
 pub fn make_all(dir: &Path) -> std::io::Result<Vec<String>> {
     let mut made = Vec::new();
-    let sizes = [16usize, 32, 48, 64, 128, 256, 512];
+    let sizes = [16usize, 32, 48, 64, 128, 256, 512, 1024];
     for (kind, base) in [(Kind::App, "fontcraft"), (Kind::Document, "fontcraft-library")] {
         for dark in [false, true] {
             let suffix = if dark { "-dark" } else { "" };
@@ -252,12 +417,16 @@ pub fn make_all(dir: &Path) -> std::io::Result<Vec<String>> {
                     (256, "icon_256x256.png"),
                     (512, "icon_256x256@2x.png"),
                     (512, "icon_512x512.png"),
+                    (1024, "icon_512x512@2x.png"),
                 ] {
                     std::fs::write(set.join(name), png(&render(kind, s, dark), s))?;
                 }
                 let icns = dir.join(format!("{base}{suffix}.icns"));
                 let ok = crate::paths::command("iconutil").arg("-c").arg("icns").arg(&set).arg("-o").arg(&icns).status().map(|s| s.success()).unwrap_or(false);
                 if ok {
+                    if kind == Kind::App && !dark {
+                        let _ = std::fs::copy(&icns, dir.join("AppIcon.icns"));
+                    }
                     let _ = std::fs::remove_dir_all(&set);
                 }
             }
@@ -293,3 +462,4 @@ pub fn make_android(res: &Path) -> std::io::Result<()> {
     w("values-night", "ic_launcher_background.xml", color("#1C1C1E").into_bytes())?;
     Ok(())
 }
+
